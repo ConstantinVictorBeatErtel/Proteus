@@ -13,3 +13,7 @@ venv/
 *.egg-info/
 .idea/
 .vscode/
+
+# Heavy / re-downloadable datasets (RoboMimic HDF5)
+*.hdf5
+data/**/*.hdf5
