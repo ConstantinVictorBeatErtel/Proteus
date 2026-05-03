@@ -1,0 +1,8 @@
+torch>=2.0
+torchvision
+transformers
+zarr>=2.14
+numpy>=1.24,<2
+pillow
+imagecodecs
+matplotlib

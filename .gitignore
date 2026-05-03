@@ -1,0 +1,14 @@
+# Dataset and heavy artifacts
+data/
+.venv/
+models/
+__pycache__/
+*.py[cod]
+*.pt
+configs/norm_stats.pt
+configs/*_losses.json
+configs/results.json
+configs/contact_threshold.pt
+notebooks/figures/
+*.log
+clip_debug.log
