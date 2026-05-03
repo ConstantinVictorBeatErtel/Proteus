@@ -30,7 +30,7 @@ class DirectMLP(nn.Module):
 
 
 class RAIDDecoder(nn.Module):
-    """Gated RAID + prior dropout + train-time Gaussian jitter on pooled prior."""
+    """Gated RAID + iter 6: dropout-regularized pooled prior pathway."""
 
     def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256, dropout: float = 0.1):
         super().__init__()
@@ -52,18 +52,12 @@ class RAIDDecoder(nn.Module):
             nn.Linear(hidden_dim, ad),
         )
         self.prior_drop = nn.Dropout(p=0.5)
-        self._prior_noise_std = 0.1
 
     def forward(self, s_t: torch.Tensor, s_next: torch.Tensor, a_prior: torch.Tensor) -> torch.Tensor:
         x = torch.cat([s_t, s_next], dim=-1)
         g = torch.sigmoid(self.gate_lin(x))
         d = self.direct(x)
-
-        if self.training:
-            ap = self.prior_drop(a_prior)
-            ap = ap + torch.randn_like(ap, device=ap.device, dtype=ap.dtype) * self._prior_noise_std
-        else:
-            ap = a_prior
+        ap = self.prior_drop(a_prior) if self.training else a_prior
         return g * d + (1.0 - g) * ap
 
 
