@@ -1,0 +1,25 @@
+# RAID Lift experiment defaults (mirror src CLI)
+experiment_name: raid_lift_v6
+dataset:
+  path: data/lift/ph/low_dim_v141.hdf5
+  obs_keys:
+    - object
+    - robot0_eef_pos
+    - robot0_eef_quat
+    - robot0_gripper_qpos
+scaling:
+  n_demos_list: [25, 50, 100, 200]
+training:
+  seed: 42
+  epochs: 50
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 1.0e-4
+model:
+  hidden_dim: 256
+  dropout: 0.1
+raid_memory:
+  max_entries: 50000
+  k_retrieve: 3
+evaluation:
+  k_retrieve: 3
