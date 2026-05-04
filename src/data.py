@@ -7,9 +7,11 @@ episode-level train/val split (80%/20%), and tactile/action normalization from t
 
 from __future__ import annotations
 
+import json
 import os
+import zipfile
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Mapping, MutableMapping, Tuple
 
 import numpy as np
 import torch
@@ -39,6 +41,145 @@ ZARR_PATH_TEMPLATE = os.path.join(
     "{task}",
     "{task}.zarr.zip",
 )
+TACTILE_CACHE_DIR = os.path.join(REPO_ROOT, "data", "tactile_cache")
+TACTILE_FRAME_SHAPE = (12, 64)
+
+
+def tactile_npy_path(task: str, split: str) -> str:
+    """Path to mmap-friendly numpy cache `{task}_{split}.npy` (full timeline length per task)."""
+    if split not in ("train", "val"):
+        raise ValueError("split must be 'train' or 'val'")
+    os.makedirs(TACTILE_CACHE_DIR, exist_ok=True)
+    return os.path.join(TACTILE_CACHE_DIR, f"{task}_{split}.npy")
+
+
+def tactile_meta_path(task: str, split: str) -> str:
+    return tactile_npy_path(task, split) + ".meta.json"
+
+
+def read_tactile_zarr_safe(
+    root: "zarr.Group", t: int
+) -> Tuple[np.ndarray, bool]:
+    """
+    Load one tactile frame from zarr. On BadZipFile returns zeros (12×64 float32).
+
+    Returns (frame float32 shape (12,64), substituted_due_to_bad_zip).
+    """
+    try:
+        tac = np.asarray(root["data"]["camera0_tactile"][t], dtype=np.float32)
+        tac = tac.reshape(TACTILE_FRAME_SHAPE)
+        return tac, False
+    except zipfile.BadZipFile:
+        return np.zeros(TACTILE_FRAME_SHAPE, dtype=np.float32), True
+
+
+def cache_tactile(task: str, split: str, *, force: bool = False) -> int:
+    """
+    Scan all tactile timesteps belonging to episodes in `split`, fill `(T,12,64)` numpy cache.
+    Rows outside this split remain zero.
+
+    Saves `*.npy` plus `*.npy.meta.json` with {\"zeroed_bad_zip_frames\": count}.
+
+    Returns number of tactile frames substituted (BadZipFile during scan).
+    """
+    if split not in ("train", "val"):
+        raise ValueError("split must be 'train' or 'val'")
+    out_path = tactile_npy_path(task, split)
+    if os.path.isfile(out_path) and not force:
+        meta_p = tactile_meta_path(task, split)
+        n = 0
+        if os.path.isfile(meta_p):
+            with open(meta_p, encoding="utf-8") as f:
+                n = int(json.load(f).get("zeroed_bad_zip_frames", 0))
+        print(f"[tactile_cache] skip exists {out_path} (zeroed_bad_zip_frames={n})")
+        return n
+
+    root = _open_zarr_for_task(task)
+    n_tot = task_num_timesteps(task)
+    out = np.zeros((n_tot, *TACTILE_FRAME_SHAPE), dtype=np.float32)
+    ends = np.array(root["meta"]["episode_ends"][:]).reshape(-1)
+    ranges = _episode_ranges(ends)
+    train_ids, val_ids = _split_episode_ids(len(ranges))
+    ep_ids = train_ids if split == "train" else val_ids
+    n_bad = 0
+    for ep_idx in ep_ids:
+        s_e, e_e = ranges[ep_idx]
+        if e_e <= s_e:
+            continue
+        for t in range(int(s_e), int(e_e)):
+            tac, bad = read_tactile_zarr_safe(root, t)
+            out[t] = tac
+            if bad:
+                n_bad += 1
+
+    np.save(out_path, out)
+    meta = {"zeroed_bad_zip_frames": n_bad}
+    with open(tactile_meta_path(task, split), "w", encoding="utf-8") as mf:
+        json.dump(meta, mf, indent=0)
+    print(
+        f"[tactile_cache] {task} {split}: wrote {out_path} "
+        f"(T={n_tot}, substituted {n_bad} bad-zip tactile frames)"
+    )
+    return n_bad
+
+
+def ensure_all_tactile_caches(force: bool = False) -> None:
+    for t in TASKS:
+        cache_tactile(t, "train", force=force)
+        cache_tactile(t, "val", force=force)
+
+
+def _print_tactile_substitution_counts_for_split(split: str) -> None:
+    counts: MutableMapping[str, int] = {}
+    missing_meta: List[str] = []
+    for task in TASKS:
+        mp = tactile_meta_path(task, split)
+        if os.path.isfile(mp):
+            with open(mp, encoding="utf-8") as f:
+                counts[task] = int(json.load(f).get("zeroed_bad_zip_frames", 0))
+        else:
+            missing_meta.append(task)
+    parts = [f"{k}: {counts[k]}" for k in TASKS if k in counts]
+    extra = ""
+    if missing_meta:
+        extra = f" (missing meta for: {missing_meta})"
+    print(
+        f"[data] tactile BadZip substitutions at cache build [{split}] — "
+        + "; ".join(parts)
+        + extra
+    )
+
+
+def _load_task_tactile_mmaps(split: str) -> Dict[str, np.ndarray]:
+    m: Dict[str, np.ndarray] = {}
+    for task in TASKS:
+        p = tactile_npy_path(task, split)
+        if not os.path.isfile(p):
+            raise FileNotFoundError(
+                f"Missing tactile cache {p}. Run: "
+                "`python -c \"import sys; sys.path.insert(0, 'src'); import data as d; "
+                'd.ensure_all_tactile_caches(force=False)"\' from repo root, '
+                "or `d.cache_tactile(task, split)`."
+            )
+        m[task] = np.load(p, mmap_mode="r")
+        expected = (task_num_timesteps(task), *TACTILE_FRAME_SHAPE)
+        if m[task].shape != expected:
+            raise ValueError(f"Tactile cache shape mismatch {p}: got {m[task].shape}, expected {expected}")
+    return m
+
+
+def tactile_at_from_mmap(
+    mmap_arr: np.ndarray, t: int
+) -> np.ndarray:
+    """
+    Read one tactile frame from mmap cache or surface rare zip backend errors as zeros.
+
+    Copies out a contiguous (12,64) float32 array.
+    """
+    try:
+        return np.asarray(mmap_arr[t], dtype=np.float32).reshape(TACTILE_FRAME_SHAPE).copy()
+    except zipfile.BadZipFile:
+        return np.zeros(TACTILE_FRAME_SHAPE, dtype=np.float32)
 
 
 def _open_zarr_for_task(task: str) -> zarr.Group:
@@ -119,6 +260,17 @@ def compute_norm_stats(norm_stats_path: str) -> Dict[str, torch.Tensor]:
     tactile_chunks: List[np.ndarray] = []
 
     for task in TASKS:
+        tcp = tactile_npy_path(task, "train")
+        if not os.path.isfile(tcp):
+            raise FileNotFoundError(
+                f"Missing tactile train cache {tcp}. Run data.ensure_all_tactile_caches() first."
+            )
+
+    tac_train_mmap: Mapping[str, np.ndarray] = {
+        task: np.load(tactile_npy_path(task, "train"), mmap_mode="r") for task in TASKS
+    }
+
+    for task in TASKS:
         root = _open_zarr_for_task(task)
         ends = np.array(root["meta"]["episode_ends"][:]).reshape(-1)
         ranges = _episode_ranges(ends)
@@ -126,7 +278,7 @@ def compute_norm_stats(norm_stats_path: str) -> Dict[str, torch.Tensor]:
         pos_ds = root["data"]["robot0_eef_pos"]
         rot_ds = root["data"]["robot0_eef_rot_axis_angle"]
         grip_ds = root["data"]["robot0_gripper_width"]
-        tac_ds = root["data"]["camera0_tactile"]
+        tac_mmap = tac_train_mmap[task]
 
         n_trans = 0
         for ep_idx in train_ids:
@@ -149,7 +301,7 @@ def compute_norm_stats(norm_stats_path: str) -> Dict[str, torch.Tensor]:
                 )
             action_chunks.append(a)
 
-            tac = np.asarray(tac_ds[s_e:e_e], dtype=np.float32)
+            tac = np.asarray(tac_mmap[s_e:e_e], dtype=np.float32).copy()
             if tac.shape[1:] != (12, 64):
                 raise ValueError(
                     f"{task} ep {ep_idx}: tactile shape {tac.shape}, expected (T,12,64)"
@@ -246,6 +398,8 @@ class VTBCWindowDataset(Dataset):
             rng.shuffle(self.windows)
 
         self.roots = {task: _open_zarr_for_task(task) for task in TASKS}
+        self._tactile_mmap = _load_task_tactile_mmaps(split)
+        _print_tactile_substitution_counts_for_split(split)
 
     def __len__(self) -> int:
         return len(self.windows)
@@ -273,7 +427,7 @@ class VTBCWindowDataset(Dataset):
         for k in range(self.horizon):
             t = s + k
             rgb = np.asarray(root["data"]["camera0_rgb"][t], dtype=np.uint8)
-            tactile = np.asarray(root["data"]["camera0_tactile"][t], dtype=np.float32)
+            tactile = tactile_at_from_mmap(self._tactile_mmap[task], t)
 
             pos0 = np.asarray(root["data"]["robot0_eef_pos"][t], dtype=np.float32).reshape(-1)
             pos1 = np.asarray(root["data"]["robot0_eef_pos"][t + 1], dtype=np.float32).reshape(
@@ -364,6 +518,8 @@ class VTBCDataset(Dataset):
             cursor += len(lst)
 
         self.roots = {task: _open_zarr_for_task(task) for task in TASKS}
+        self._tactile_mmap = _load_task_tactile_mmaps(split)
+        _print_tactile_substitution_counts_for_split(split)
 
     def __len__(self) -> int:
         return len(self._flat)
@@ -387,7 +543,7 @@ class VTBCDataset(Dataset):
 
         root = self.roots[task]
         rgb = np.asarray(root["data"]["camera0_rgb"][t], dtype=np.uint8)
-        tactile = np.asarray(root["data"]["camera0_tactile"][t], dtype=np.float32)
+        tactile = tactile_at_from_mmap(self._tactile_mmap[task], t)
 
         pos0 = np.asarray(root["data"]["robot0_eef_pos"][t], dtype=np.float32).reshape(-1)
         pos1 = np.asarray(root["data"]["robot0_eef_pos"][t + 1], dtype=np.float32).reshape(
@@ -429,6 +585,25 @@ class VTBCDataset(Dataset):
 
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="VTBC data utilities")
+    parser.add_argument(
+        "--cache-tactile",
+        action="store_true",
+        help="Build data/tactile_cache/{task}_{train,val}.npy via sequential zarr read",
+    )
+    parser.add_argument(
+        "--cache-tactile-force",
+        action="store_true",
+        help="With --cache-tactile: overwrite existing npy/meta",
+    )
+    args, _remain = parser.parse_known_args(sys.argv[1:])
+    if args.cache_tactile:
+        ensure_all_tactile_caches(force=args.cache_tactile_force)
+        sys.exit(0)
+
     norm_path = os.path.join(REPO_ROOT, "configs", "norm_stats.pt")
     print("[data] Tasks:", TASKS)
     train_eps, val_eps = count_episodes_per_split()

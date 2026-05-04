@@ -150,7 +150,7 @@ def calibrate_contact_threshold(pct_nonzero: float = 10.0) -> Tuple[float, Dict[
         ends = np.array(root["meta"]["episode_ends"][:]).reshape(-1)
         ranges = datamod._episode_ranges(ends)
         train_ids, _ = datamod._split_episode_ids(len(ranges))
-        tactile_ds = root["data"]["camera0_tactile"]
+        tactile_mmap = np.load(datamod.tactile_npy_path(task, "train"), mmap_mode="r")
 
         n_added = 0
         for ep_idx in train_ids:
@@ -158,7 +158,7 @@ def calibrate_contact_threshold(pct_nonzero: float = 10.0) -> Tuple[float, Dict[
             if e_e <= s_e:
                 continue
             # Tactile at timestep t pairs with transition t→t+1 for t in [s_e, e_e)
-            block = np.asarray(tactile_ds[s_e:e_e], dtype=np.float64)
+            block = np.asarray(tactile_mmap[s_e:e_e], dtype=np.float64).copy()
             if block.ndim != 3 or block.shape[1:] != (12, 64):
                 raise ValueError(
                     f"Unexpected tactile shape for {task} ep {ep_idx}: {block.shape}"

@@ -226,9 +226,18 @@ def run_epoch_eval(
     return total_sum / max(n_elems, 1)
 
 
+def ensure_tactile_caches_for_run() -> None:
+    import data as dm
+
+    force = os.environ.get("VTBC_FORCE_TACTILE_CACHE", "").lower() in ("1", "true", "yes")
+    print("[train] Ensuring tactile npy caches (see data/tactile_cache/) …")
+    dm.ensure_all_tactile_caches(force=force)
+
+
 def train_one_condition(condition: Condition) -> None:
     import data as datamod
 
+    ensure_tactile_caches_for_run()
     seed_everything(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n========== Train condition: {condition} on {device} ==========")
