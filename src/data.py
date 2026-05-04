@@ -11,7 +11,7 @@ import json
 import os
 import zipfile
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, MutableMapping, Tuple
+from typing import Dict, List, Mapping, Tuple
 
 import numpy as np
 import torch
@@ -130,7 +130,7 @@ def ensure_all_tactile_caches(force: bool = False) -> None:
 
 
 def _print_tactile_substitution_counts_for_split(split: str) -> None:
-    counts: MutableMapping[str, int] = {}
+    counts: Dict[str, int] = {}
     missing_meta: List[str] = []
     for task in TASKS:
         mp = tactile_meta_path(task, split)
