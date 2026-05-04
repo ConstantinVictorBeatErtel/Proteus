@@ -26,7 +26,7 @@ if SRC_DIR not in sys.path:
 
 Condition = Literal["vision_only", "tactile_only", "visuo_tactile"]
 
-NUM_WORKERS = int(os.environ.get("VTBC_NUM_WORKERS", "4"))
+NUM_WORKERS = int(os.environ.get("VTBC_NUM_WORKERS", "0"))
 
 CLIP_CACHE_DIR = os.path.join(REPO_ROOT, "data", "clip_cache")
 CONFIG_DIR = os.path.join(REPO_ROOT, "configs")

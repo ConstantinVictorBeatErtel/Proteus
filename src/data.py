@@ -182,6 +182,58 @@ def tactile_at_from_mmap(
         return np.zeros(TACTILE_FRAME_SHAPE, dtype=np.float32)
 
 
+def modality_shapes(root: zarr.Group) -> Tuple[Tuple[int, ...], int, int]:
+    """Trailing RGB HWC dims and flattened vec sizes for pose / rotation arrays."""
+    rgb_ds = root["data"]["camera0_rgb"]
+    pos_ds = root["data"]["robot0_eef_pos"]
+    rot_ds = root["data"]["robot0_eef_rot_axis_angle"]
+    hwc = tuple(int(x) for x in rgb_ds.shape[1:])
+    pn = int(np.prod(pos_ds.shape[1:], dtype=np.int64))
+    rn = int(np.prod(rot_ds.shape[1:], dtype=np.int64))
+    return hwc, pn, rn
+
+
+def read_rgb_uint8_safe(rgb_ds, t: int, hwc: Tuple[int, ...]) -> np.ndarray:
+    try:
+        return np.asarray(rgb_ds[t], dtype=np.uint8).reshape(hwc).copy()
+    except (zipfile.BadZipFile, ValueError):
+        return np.zeros(hwc, dtype=np.uint8)
+
+
+def read_vec_ds_safe(ds, t: int, dim: int) -> np.ndarray:
+    try:
+        return np.asarray(ds[t], dtype=np.float32).reshape(dim).copy()
+    except (zipfile.BadZipFile, ValueError):
+        return np.zeros((dim,), dtype=np.float32)
+
+
+def read_gripper_scalar_safe(ds, t: int) -> float:
+    try:
+        return float(np.asarray(ds[t], dtype=np.float32).reshape(-1)[0])
+    except (zipfile.BadZipFile, ValueError):
+        return 0.0
+
+
+def _episode_arrays_for_motion(
+    root: zarr.Group, s_e: int, e_e: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Pos/rot rows for inclusive timestep range [s_e, e_e]; safe per-index zarr reads."""
+    grp = root["data"]
+    pos_ds = grp["robot0_eef_pos"]
+    rot_ds = grp["robot0_eef_rot_axis_angle"]
+    grip_ds = grp["robot0_gripper_width"]
+    _, pn, rn = modality_shapes(root)
+    span = int(e_e - s_e + 1)
+    pos = np.zeros((span, pn), dtype=np.float32)
+    rot = np.zeros((span, rn), dtype=np.float32)
+    grip = np.zeros((span,), dtype=np.float32)
+    for i, t_i in enumerate(range(int(s_e), int(e_e) + 1)):
+        pos[i] = read_vec_ds_safe(pos_ds, t_i, pn)
+        rot[i] = read_vec_ds_safe(rot_ds, t_i, rn)
+        grip[i] = np.float32(read_gripper_scalar_safe(grip_ds, t_i))
+    return pos, rot, grip
+
+
 def _open_zarr_for_task(task: str) -> zarr.Group:
     path = ZARR_PATH_TEMPLATE.format(task=task)
     if not os.path.isfile(path):
@@ -275,9 +327,6 @@ def compute_norm_stats(norm_stats_path: str) -> Dict[str, torch.Tensor]:
         ends = np.array(root["meta"]["episode_ends"][:]).reshape(-1)
         ranges = _episode_ranges(ends)
         train_ids, _ = _split_episode_ids(len(ranges))
-        pos_ds = root["data"]["robot0_eef_pos"]
-        rot_ds = root["data"]["robot0_eef_rot_axis_angle"]
-        grip_ds = root["data"]["robot0_gripper_width"]
         tac_mmap = tac_train_mmap[task]
 
         n_trans = 0
@@ -285,9 +334,7 @@ def compute_norm_stats(norm_stats_path: str) -> Dict[str, torch.Tensor]:
             s_e, e_e = ranges[ep_idx]
             if e_e <= s_e:
                 continue
-            pos = np.asarray(pos_ds[s_e : e_e + 1], dtype=np.float32)
-            rot = np.asarray(rot_ds[s_e : e_e + 1], dtype=np.float32)
-            grip = np.asarray(grip_ds[s_e : e_e + 1], dtype=np.float32).reshape(-1)
+            pos, rot, grip = _episode_arrays_for_motion(root, s_e, e_e)
 
             pos = pos.reshape(pos.shape[0], -1)
             rot = rot.reshape(rot.shape[0], -1)
@@ -398,6 +445,18 @@ class VTBCWindowDataset(Dataset):
             rng.shuffle(self.windows)
 
         self.roots = {task: _open_zarr_for_task(task) for task in TASKS}
+        self.geom: Dict[str, Tuple[Tuple[int, ...], int, int]] = {
+            task: modality_shapes(self.roots[task]) for task in TASKS
+        }
+        self._arrays: Dict[str, Dict[str, object]] = {}
+        for task in TASKS:
+            g = self.roots[task]["data"]
+            self._arrays[task] = {
+                "rgb": g["camera0_rgb"],
+                "pos": g["robot0_eef_pos"],
+                "rot": g["robot0_eef_rot_axis_angle"],
+                "grip": g["robot0_gripper_width"],
+            }
         self._tactile_mmap = _load_task_tactile_mmaps(split)
         _print_tactile_substitution_counts_for_split(split)
 
@@ -418,7 +477,8 @@ class VTBCWindowDataset(Dataset):
         self, idx: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         task_idx, task, s = self.windows[idx]
-        root = self.roots[task]
+        hwc, pn, rn = self.geom[task]
+        arr = self._arrays[task]
 
         rgbs = []
         tacs = []
@@ -426,28 +486,15 @@ class VTBCWindowDataset(Dataset):
 
         for k in range(self.horizon):
             t = s + k
-            rgb = np.asarray(root["data"]["camera0_rgb"][t], dtype=np.uint8)
+            rgb = read_rgb_uint8_safe(arr["rgb"], t, hwc)
             tactile = tactile_at_from_mmap(self._tactile_mmap[task], t)
 
-            pos0 = np.asarray(root["data"]["robot0_eef_pos"][t], dtype=np.float32).reshape(-1)
-            pos1 = np.asarray(root["data"]["robot0_eef_pos"][t + 1], dtype=np.float32).reshape(
-                -1
-            )
-            r0 = np.asarray(
-                root["data"]["robot0_eef_rot_axis_angle"][t], dtype=np.float32
-            ).reshape(-1)
-            r1 = np.asarray(
-                root["data"]["robot0_eef_rot_axis_angle"][t + 1], dtype=np.float32
-            ).reshape(-1)
-            g0 = float(
-                np.asarray(root["data"]["robot0_gripper_width"][t], dtype=np.float32).reshape(-1)[0]
-            )
-            g1 = float(
-                np.asarray(
-                    root["data"]["robot0_gripper_width"][t + 1],
-                    dtype=np.float32,
-                ).reshape(-1)[0]
-            )
+            pos0 = read_vec_ds_safe(arr["pos"], t, pn)
+            pos1 = read_vec_ds_safe(arr["pos"], t + 1, pn)
+            r0 = read_vec_ds_safe(arr["rot"], t, rn)
+            r1 = read_vec_ds_safe(arr["rot"], t + 1, rn)
+            g0 = read_gripper_scalar_safe(arr["grip"], t)
+            g1 = read_gripper_scalar_safe(arr["grip"], t + 1)
 
             action = torch.from_numpy(
                 np.concatenate(
@@ -518,6 +565,18 @@ class VTBCDataset(Dataset):
             cursor += len(lst)
 
         self.roots = {task: _open_zarr_for_task(task) for task in TASKS}
+        self.geom: Dict[str, Tuple[Tuple[int, ...], int, int]] = {
+            task: modality_shapes(self.roots[task]) for task in TASKS
+        }
+        self._arrays: Dict[str, Dict[str, object]] = {}
+        for task in TASKS:
+            g = self.roots[task]["data"]
+            self._arrays[task] = {
+                "rgb": g["camera0_rgb"],
+                "pos": g["robot0_eef_pos"],
+                "rot": g["robot0_eef_rot_axis_angle"],
+                "grip": g["robot0_gripper_width"],
+            }
         self._tactile_mmap = _load_task_tactile_mmaps(split)
         _print_tactile_substitution_counts_for_split(split)
 
@@ -541,24 +600,17 @@ class VTBCDataset(Dataset):
         task = sample.task
         t = sample.t
 
-        root = self.roots[task]
-        rgb = np.asarray(root["data"]["camera0_rgb"][t], dtype=np.uint8)
+        hwc, pn, rn = self.geom[task]
+        arr = self._arrays[task]
+        rgb = read_rgb_uint8_safe(arr["rgb"], t, hwc)
         tactile = tactile_at_from_mmap(self._tactile_mmap[task], t)
 
-        pos0 = np.asarray(root["data"]["robot0_eef_pos"][t], dtype=np.float32).reshape(-1)
-        pos1 = np.asarray(root["data"]["robot0_eef_pos"][t + 1], dtype=np.float32).reshape(
-            -1
-        )
-        r0 = np.asarray(
-            root["data"]["robot0_eef_rot_axis_angle"][t], dtype=np.float32
-        ).reshape(-1)
-        r1 = np.asarray(
-            root["data"]["robot0_eef_rot_axis_angle"][t + 1], dtype=np.float32
-        ).reshape(-1)
-        g0 = float(np.asarray(root["data"]["robot0_gripper_width"][t], dtype=np.float32).reshape(-1)[0])
-        g1 = float(
-            np.asarray(root["data"]["robot0_gripper_width"][t + 1], dtype=np.float32).reshape(-1)[0]
-        )
+        pos0 = read_vec_ds_safe(arr["pos"], t, pn)
+        pos1 = read_vec_ds_safe(arr["pos"], t + 1, pn)
+        r0 = read_vec_ds_safe(arr["rot"], t, rn)
+        r1 = read_vec_ds_safe(arr["rot"], t + 1, rn)
+        g0 = read_gripper_scalar_safe(arr["grip"], t)
+        g1 = read_gripper_scalar_safe(arr["grip"], t + 1)
 
         action = torch.from_numpy(
             np.concatenate(
