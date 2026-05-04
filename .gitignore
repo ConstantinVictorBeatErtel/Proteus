@@ -12,3 +12,7 @@ configs/contact_threshold.pt
 notebooks/figures/
 *.log
 clip_debug.log
+train_nohup.out
+post_train_git_push_nohup.out
+tmp_zarr_probe.py
+vtbc_training_chain.done

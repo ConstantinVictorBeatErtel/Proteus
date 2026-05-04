@@ -99,6 +99,22 @@ python src/run_all.py
 python notebooks/02_results.py
 ```
 
+**Tactile `.npy` cache (recommended for flaky `*.zarr.zip`):** trains/eval read tactile via `data/tactile_cache/{task}_{train,val}.npy` when present. Build or refresh with:
+
+```bash
+python src/data.py --cache-tactile          # skip if files exist
+python src/data.py --cache-tactile --cache-tactile-force   # overwrite
+```
+
+**Background chain on a GPU box (vision → tactile → visuo_tactile → evaluate):**
+
+```bash
+cd /home/ubuntu/proteus/vtbc && source .venv/bin/activate
+chmod +x scripts/train_chain_three_then_eval.sh   # once
+nohup bash scripts/train_chain_three_then_eval.sh >> train_nohup.out 2>&1 &
+echo "PID=$!   done when vtbc_training_chain.done exists"
+```
+
 ---
 
 ## Reproducing report figures (`notebooks/figures/`)
