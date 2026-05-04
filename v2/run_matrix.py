@@ -37,6 +37,7 @@ def _expand_phase(phase: dict) -> list[CellConfig]:
     n_demos_list = phase.get("n_demos", [25])
     seeds = phase.get("seeds", [42])
     encoders = phase.get("encoders", [None])
+    action_norm = phase.get("action_norm", "zscore")
 
     for head, dataset, n_demos, seed, encoder in product(heads, datasets, n_demos_list, seeds, encoders):
         cells.append(
@@ -51,6 +52,7 @@ def _expand_phase(phase: dict) -> list[CellConfig]:
                 batch_size=int(phase.get("batch_size", 256)),
                 lr=float(phase.get("lr", 1e-3)),
                 weight_decay=float(phase.get("weight_decay", 1e-4)),
+                action_norm_mode=str(action_norm),
             )
         )
     return cells
@@ -75,6 +77,9 @@ def main() -> None:
     ap.add_argument("--matrix", default=str(MATRIX_PATH))
     ap.add_argument("--phase", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-eval", action="store_true",
+                    help="Skip the per-cell evaluation pass (no prediction PNGs).")
+    ap.add_argument("--n-panels", type=int, default=8)
     ap.add_argument("--project", default="raid_v2")
     args = ap.parse_args()
 
@@ -87,7 +92,8 @@ def main() -> None:
                 {
                     "run_id": c.run_id, "phase": c.phase, "head": c.head,
                     "dataset": c.dataset, "n_demos": c.n_demos, "seed": c.seed,
-                    "encoder": c.encoder, "completed": _completed(c),
+                    "encoder": c.encoder,
+                    "action_norm_mode": c.action_norm_mode, "completed": _completed(c),
                 }
             ))
         return
@@ -96,10 +102,33 @@ def main() -> None:
     for i, cfg in enumerate(cells, 1):
         if _completed(cfg):
             print(f"[run_matrix] [{i}/{len(cells)}] SKIP completed run_id={cfg.run_id}")
+            if not args.no_eval:
+                _safe_eval(cfg.run_id, args.n_panels)
             continue
-        print(f"[run_matrix] [{i}/{len(cells)}] START phase={cfg.phase} head={cfg.head} dataset={cfg.dataset} n_demos={cfg.n_demos} seed={cfg.seed} run_id={cfg.run_id}")
+        print(
+            f"[run_matrix] [{i}/{len(cells)}] START phase={cfg.phase} head={cfg.head} "
+            f"dataset={cfg.dataset} n_demos={cfg.n_demos} seed={cfg.seed} "
+            f"action_norm={cfg.action_norm_mode} run_id={cfg.run_id}"
+        )
         out = train_cell(cfg, project=args.project)
         print(f"[run_matrix] DONE  best_val_mse={out['best_val_mse']:.6f} elapsed={time.time() - started:.0f}s")
+        if not args.no_eval:
+            _safe_eval(cfg.run_id, args.n_panels)
+
+
+def _safe_eval(run_id: str, n_panels: int) -> None:
+    """Run evaluation + prediction-panel render, never killing the matrix on failure."""
+    try:
+        from .evaluate import evaluate_cell
+
+        m = evaluate_cell(run_id, n_panels=n_panels, render_panels=True)
+        print(
+            f"[run_matrix] EVAL  run_id={run_id} val_mse={m['val_mse']:.6f} "
+            f"contact_mse={m.get('contact_mse')} -> "
+            f"figures/predictions/{run_id}/grid.png"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[run_matrix] EVAL FAILED for run_id={run_id}: {exc!r}")
 
 
 if __name__ == "__main__":

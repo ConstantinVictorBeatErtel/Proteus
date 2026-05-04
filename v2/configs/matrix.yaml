@@ -9,21 +9,26 @@
 # identifiers, not schedule identifiers.
 
 phases:
-  # Reproduce the legacy autoresearch baseline on RoboMimic Lift PH
-  # low-dim under the new harness so v2 numbers are directly
-  # comparable to configs/results.json on main.
+  # Phase A: reproduce the legacy autoresearch baseline on RoboMimic Lift PH
+  # low-dim under the new harness. Uses the same z-score action normalization
+  # as src/data.py so val_mse can be compared directly to configs/results.json.
+  # kNN is a no-train baseline; its val_mse equals the legacy "nearest_neighbor"
+  # column of results.json.
   - id: A
-    heads: [direct_mlp, raid]
+    heads: [direct_mlp, raid, knn]
     datasets: [robomimic_lift_ph_low_dim]
     n_demos: [25, 50, 100, 200]
     seeds: [42, 1337, 2024]
     epochs: 50
     batch_size: 256
+    action_norm: zscore
 
-  # Cross-dataset state-only IDM on the four RoboMimic tasks. We mix
-  # PH and MH variants by listing them as parallel datasets; the
-  # MixedIDMDataset wrapper takes care of per-dataset z-score and
-  # the optional dataset-id token.
+  # Phase B: cross-dataset state-only IDM on the four RoboMimic tasks
+  # (PH+MH). The MixedIDMDataset wrapper concatenates the children. Note
+  # that RoboMimic ``object`` width varies per task, so this phase only
+  # runs cleanly when all tasks happen to share the same low-dim state
+  # width; otherwise the runner errors with a clear message and you
+  # should use the image-feature variant from phase C instead.
   - id: B
     heads: [direct_mlp, transformer, diffusion]
     datasets:
@@ -32,24 +37,24 @@ phases:
     n_demos: [200]
     seeds: [42, 1337, 2024]
     epochs: 50
+    action_norm: zscore
 
-  # Image-feature IDM (the new core). Two image datasets x DINOv2
-  # CLS features. Cached safetensors are read from
-  # <artifact_root>/features/<dataset>_dinov2_cls.safetensors.
+  # Phase C: image-feature IDM (the new core). DINOv2 CLS features
+  # cached by ``v2.features``. RAID uses retrieval over the same
+  # cached features.
   - id: C
     heads: [direct_mlp, raid, transformer, diffusion]
     datasets:
       - robomimic_square_ph_image
-      - libero_spatial
+      # libero_spatial pending RLDS schema verification; see
+      # v2/datasets/cached.py for the placeholder.
     n_demos: [50, 200]
     seeds: [42, 1337, 2024]
     encoders: [dinov2]
     epochs: 50
+    action_norm: q01_q99
 
-  # Encoder ablation: swap DINOv2 -> Theia on the best-of-C head.
-  # The runner reads the best head off the C-row aggregate and
-  # substitutes it; we list both heads here so dry-run still
-  # enumerates correctly.
+  # Phase D: encoder ablation. DINOv2 vs Theia on the best-of-C head.
   - id: D
     heads: [transformer]
     datasets: [robomimic_square_ph_image]
@@ -57,23 +62,26 @@ phases:
     seeds: [42, 1337, 2024]
     encoders: [theia]
     epochs: 50
+    action_norm: q01_q99
 
-  # Multi-task retrieval test on LIBERO-Goal pooled across tasks.
-  # Hypothesis: RAID closes or exceeds DirectMLP at small per-task
-  # demos, the headline retrieval claim of the project.
-  - id: E
-    heads: [direct_mlp, raid]
-    datasets: [libero_goal]
-    n_demos: [50]
-    seeds: [42, 1337, 2024]
-    encoders: [dinov2]
-    epochs: 50
+  # Phase E: multi-task retrieval test on LIBERO-Goal pooled across tasks.
+  # Pending the LIBERO RLDS schema fix in v2/datasets/cached.py.
+  # - id: E
+  #   heads: [direct_mlp, raid]
+  #   datasets: [libero_goal]
+  #   n_demos: [50]
+  #   seeds: [42, 1337, 2024]
+  #   encoders: [dinov2]
+  #   epochs: 50
+  #   action_norm: q01_q99
 
-  # Optional GR00T-N1.5 LoRA stretch goal on a single dataset.
-  - id: F
-    heads: [groot_n15_lora]
-    datasets: [libero_spatial]
-    n_demos: [200]
-    seeds: [42]
-    encoders: [native]
-    epochs: 30
+  # Phase F: optional GR00T-N1.5 LoRA stretch goal. Out of scope by
+  # default; uncomment once the loader has been wired against
+  # github.com/NVIDIA/Isaac-GR00T scripts/gr00t_finetune.py.
+  # - id: F
+  #   heads: [groot_n15_lora]
+  #   datasets: [libero_spatial]
+  #   n_demos: [200]
+  #   seeds: [42]
+  #   encoders: [native]
+  #   epochs: 30

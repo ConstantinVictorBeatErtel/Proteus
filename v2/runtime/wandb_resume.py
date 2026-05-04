@@ -56,6 +56,21 @@ def _wandb_disabled() -> bool:
         return True
 
 
+def _wandb_can_log_online() -> bool:
+    """True iff wandb has a credential it can use to talk to the API."""
+    if os.environ.get("WANDB_API_KEY"):
+        return True
+    if os.environ.get("WANDB_MODE", "").lower() in {"offline", "disabled"}:
+        return False
+    # Last resort: ask the SDK whether it can find a netrc credential.
+    try:
+        from wandb.sdk.lib.apikey import api_key  # type: ignore
+
+        return bool(api_key(None))
+    except Exception:
+        return False
+
+
 @contextmanager
 def init_run(
     project: str,
@@ -68,6 +83,11 @@ def init_run(
 
     Persists ``run_id`` to ``<artifact_root>/runs/<run_id>/run_id.txt`` so a
     later session with the same deterministic id reattaches.
+
+    If ``WANDB_DISABLED`` is set or ``wandb`` is not installed, returns a
+    no-op :class:`DummyRun`. If ``wandb`` is available but no API key is
+    found, runs in ``WANDB_MODE=offline`` so training never blocks on an
+    interactive login prompt.
     """
     ck = CheckpointDir(run_id)
     rid_file = ck.run_id_file()
@@ -84,16 +104,27 @@ def init_run(
 
     import wandb  # type: ignore
 
-    run = wandb.init(
-        project=project,
-        id=run_id,
-        resume="allow",
-        config=config or {},
-        name=name or run_id,
-        tags=tags or [],
-        dir=str(ck.path),
-    )
+    if not _wandb_can_log_online() and not os.environ.get("WANDB_MODE"):
+        os.environ["WANDB_MODE"] = "offline"
+        print("[wandb_resume] no WANDB_API_KEY found; running in offline mode")
+
+    try:
+        run = wandb.init(
+            project=project,
+            id=run_id,
+            resume="allow",
+            config=config or {},
+            name=name or run_id,
+            tags=tags or [],
+            dir=str(ck.path),
+        )
+    except Exception as exc:  # noqa: BLE001 — never let logging kill training
+        print(f"[wandb_resume] wandb.init failed ({exc!r}); falling back to DummyRun")
+        run = DummyRun(run_id)
     try:
         yield run
     finally:
-        run.finish()
+        try:
+            run.finish()
+        except Exception:  # noqa: BLE001
+            pass

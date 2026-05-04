@@ -66,12 +66,20 @@ def load_encoder(name: str, device: torch.device | str = "cuda") -> EncoderHandl
     return EncoderHandle(name=name, hf_id=hf_id, model=model, preprocess=_preprocess, feature_dim=fdim)
 
 
+def _module_dtype(module: torch.nn.Module) -> torch.dtype:
+    try:
+        return next(module.parameters()).dtype
+    except StopIteration:
+        return torch.float32
+
+
 @torch.no_grad()
 def encode_batch(handle: EncoderHandle, frames: np.ndarray, device: torch.device | str) -> torch.Tensor:
     """Return ``(B, feature_dim)`` fp32 CLS features."""
     pixels = handle.preprocess(frames).to(device)
-    if pixels.dtype != handle.model.dtype:  # type: ignore[attr-defined]
-        pixels = pixels.to(handle.model.dtype)  # type: ignore[attr-defined]
+    target_dtype = _module_dtype(handle.model)
+    if pixels.dtype != target_dtype:
+        pixels = pixels.to(target_dtype)
     out = handle.model(pixel_values=pixels)
     if hasattr(out, "pooler_output") and out.pooler_output is not None:
         cls = out.pooler_output

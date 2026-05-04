@@ -58,6 +58,7 @@ class DiffusionPolicyIDM(nn.Module):
         time_emb_dim: int = 128,
         n_train_timesteps: int = 100,
         n_inference_steps: int = 16,
+        clip_action_range: tuple[float, float] | None = None,
     ) -> None:
         super().__init__()
         self.obs_dim = int(obs_dim)
@@ -65,6 +66,7 @@ class DiffusionPolicyIDM(nn.Module):
         self.n_obs_steps = int(n_obs_steps)
         self.n_train_timesteps = int(n_train_timesteps)
         self.n_inference_steps = int(n_inference_steps)
+        self.clip_action_range = clip_action_range
 
         self.time_emb = _SinusoidalTimeEmb(time_emb_dim)
         cond_dim = self.obs_dim * self.n_obs_steps + time_emb_dim
@@ -123,7 +125,9 @@ class DiffusionPolicyIDM(nn.Module):
             ab = self.alpha_bar[t]
             ab_prev = self.alpha_bar[steps[i + 1]] if i + 1 < len(steps) else torch.tensor(1.0, device=device)
             x0_pred = (x - torch.sqrt(1.0 - ab) * eps) / torch.sqrt(ab).clamp(min=1e-6)
-            x0_pred = x0_pred.clamp(-1.0, 1.0)
+            if self.clip_action_range is not None:
+                lo, hi = self.clip_action_range
+                x0_pred = x0_pred.clamp(lo, hi)
             sigma = torch.sqrt(((1 - ab_prev) / (1 - ab)).clamp(min=0.0)) * torch.sqrt((1 - ab / ab_prev).clamp(min=0.0))
             mean = torch.sqrt(ab_prev) * x0_pred + torch.sqrt((1 - ab_prev - sigma**2).clamp(min=0.0)) * eps
             if i + 1 < len(steps):
@@ -131,7 +135,10 @@ class DiffusionPolicyIDM(nn.Module):
                 x = mean + sigma * noise
             else:
                 x = mean
-        return x.clamp(-1.0, 1.0)
+        if self.clip_action_range is not None:
+            lo, hi = self.clip_action_range
+            return x.clamp(lo, hi)
+        return x
 
     def forward(self, obs_t: torch.Tensor, obs_next: torch.Tensor) -> torch.Tensor:
         """Sample a single action chunk (h=1)."""

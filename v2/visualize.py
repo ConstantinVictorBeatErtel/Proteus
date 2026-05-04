@@ -49,7 +49,14 @@ def _action_bar_panel(ax, action_gt: np.ndarray, action_pred: np.ndarray | None)
     ax.axhline(0.0, color="#777", linewidth=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels(ACTION_LABELS, fontsize=8)
-    ax.set_ylim(-1.1, 1.1)
+    # Adaptive ylim so both q01_q99 ([-1, 1]) and z-score (often > 1) plots
+    # render cleanly without clipping the tallest bar.
+    stack = [action_gt]
+    if action_pred is not None:
+        stack.append(np.asarray(action_pred))
+    finite_max = float(np.max(np.abs(np.concatenate(stack)))) if stack else 1.0
+    ymax = max(1.1, finite_max * 1.15)
+    ax.set_ylim(-ymax, ymax)
     ax.set_ylabel("normalized action")
     ax.legend(fontsize=8, loc="upper right")
     if action_pred is not None:
@@ -152,16 +159,23 @@ def render_grid(
     for i, panel in enumerate(panels):
         r, c = divmod(i, cols)
         ax = axes[r, c]
-        ax.axis("off")
         frame_t = panel.get("frame_t")
         frame_next = panel.get("frame_next")
+        action_gt = np.asarray(panel.get("action_gt"))
+        action_pred = panel.get("action_pred")
         if frame_t is not None and frame_next is not None:
+            ax.axis("off")
             h = frame_t.shape[0]
             stitched = np.concatenate([frame_t, frame_next], axis=1)
             ax.imshow(stitched)
             ax.axhline(h - 0.5, color="white", linewidth=0)
-        action_gt = np.asarray(panel.get("action_gt"))
-        action_pred = panel.get("action_pred")
+        else:
+            # No RGB frames available -> render the action bars in the
+            # grid cell so the panel is still informative.
+            _action_bar_panel(
+                ax, action_gt,
+                None if action_pred is None else np.asarray(action_pred),
+            )
         rmse = ""
         if action_pred is not None:
             rmse = f" RMSE={float(np.sqrt(np.mean((np.asarray(action_pred) - action_gt) ** 2))):.3f}"

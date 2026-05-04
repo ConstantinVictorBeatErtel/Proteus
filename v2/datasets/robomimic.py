@@ -47,8 +47,31 @@ class RoboMimicSpec:
 
 
 def hdf5_path_for(spec: RoboMimicSpec, data_root: Path) -> Path:
+    """Resolve the HDF5 path for a spec, checking several known layouts.
+
+    Search order:
+      1. ``<data_root>/v1.5/<task>/<variant>/<modality>_v141.hdf5``
+         (the layout used by ``huggingface_hub.snapshot_download`` on
+         ``amandlek/robomimic``)
+      2. ``<data_root>/<task>/<variant>/<modality>_v141.hdf5``
+         (flat layout some mirrors use)
+      3. ``<repo_root>/data/<task>/<variant>/<modality>_v141.hdf5``
+         (the legacy local path used by ``src/data.py``)
+
+    Returns the first path that exists; if none does, returns the
+    primary candidate so callers can produce a clear FileNotFoundError.
+    """
     fname = f"{spec.modality}_v141.hdf5"
-    return data_root / "v1.5" / spec.task / spec.variant / fname
+    candidates = [
+        data_root / "v1.5" / spec.task / spec.variant / fname,
+        data_root / spec.task / spec.variant / fname,
+    ]
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.append(repo_root / "data" / spec.task / spec.variant / fname)
+    for c in candidates:
+        if c.is_file():
+            return c
+    return candidates[0]
 
 
 def _lowdim_state_dim(obs_grp: h5py.Group) -> int:
@@ -162,7 +185,7 @@ class RoboMimicTransitionDataset(Dataset):
         state_mean: np.ndarray | None = None,
         state_std: np.ndarray | None = None,
         normalize_state: bool = True,
-        action_norm_mode: str = "q01_q99",
+        action_norm_mode: str = "zscore",
     ) -> None:
         self.spec = spec
         self.hdf5_path = hdf5_path
@@ -187,6 +210,8 @@ class RoboMimicTransitionDataset(Dataset):
 
         self._q01 = torch.as_tensor(action_stats.q01, dtype=torch.float32)
         self._q99 = torch.as_tensor(action_stats.q99, dtype=torch.float32)
+        self._a_mean = torch.as_tensor(action_stats.mean, dtype=torch.float32)
+        self._a_std = torch.as_tensor(action_stats.std, dtype=torch.float32).clamp(min=1e-6)
 
     def __len__(self) -> int:
         return len(self.transitions)
@@ -195,6 +220,8 @@ class RoboMimicTransitionDataset(Dataset):
         return (s - self.state_mean) / self.state_std
 
     def _norm_action(self, a: torch.Tensor) -> torch.Tensor:
+        if self.action_norm_mode == "zscore":
+            return (a - self._a_mean) / self._a_std
         denom = (self._q99 - self._q01).clamp(min=1e-6)
         x = 2.0 * (a - self._q01) / denom - 1.0
         return x.clamp(-1.0, 1.0)
@@ -236,11 +263,28 @@ def make_train_val(
     data_root: Path,
     train_frac: float = 0.8,
     action_stats: ActionStats | None = None,
+    action_norm_mode: str = "zscore",
 ) -> tuple[RoboMimicTransitionDataset, RoboMimicTransitionDataset, ActionStats, int]:
-    """Build train and val datasets with shared per-dataset action stats."""
+    """Build train and val datasets with shared per-dataset action stats.
+
+    ``action_norm_mode``:
+
+    * ``"zscore"`` — ``(a - mean) / std``. Default. Matches the legacy
+      ``src/data.py`` recipe so phase A reproduces the autoresearch
+      baseline (val_mse ~ 0.397) and so mixing across RoboMimic tasks
+      keeps action ranges compatible.
+    * ``"q01_q99"`` — OpenVLA-style mapping into ``[-1, 1]``. Use this
+      when mixing image-feature cells across heterogeneous embodiments
+      and you want the OpenVLA / RDT-1B / GR00T-N1 normalization recipe.
+    """
     hdf5_path = hdf5_path_for(spec, data_root)
     if not hdf5_path.is_file():
-        raise FileNotFoundError(f"missing RoboMimic file: {hdf5_path}")
+        raise FileNotFoundError(
+            f"missing RoboMimic file: {hdf5_path}\n"
+            "Tried v2 layout, flat layout, and the legacy ``data/`` layout. "
+            "Run ``python3 -m v2.runtime.data_download`` first, or copy the "
+            "HDF5 into ``data/<task>/<variant>/<modality>_v141.hdf5``."
+        )
 
     demos, state_dim = load_demos(spec, hdf5_path, n_demos, keep_image_in_memory=False)
     train_didx, val_didx = split_demo_indices(n_demos, train_frac=train_frac)
@@ -259,9 +303,13 @@ def make_train_val(
     state_std = np.maximum(states.std(axis=0).astype(np.float32), 1e-6)
 
     train_ds = RoboMimicTransitionDataset(
-        spec, hdf5_path, train_triples, state_dim, action_stats, state_mean, state_std
+        spec, hdf5_path, train_triples, state_dim, action_stats,
+        state_mean=state_mean, state_std=state_std,
+        action_norm_mode=action_norm_mode,
     )
     val_ds = RoboMimicTransitionDataset(
-        spec, hdf5_path, val_triples, state_dim, action_stats, state_mean, state_std
+        spec, hdf5_path, val_triples, state_dim, action_stats,
+        state_mean=state_mean, state_std=state_std,
+        action_norm_mode=action_norm_mode,
     )
     return train_ds, val_ds, action_stats, state_dim

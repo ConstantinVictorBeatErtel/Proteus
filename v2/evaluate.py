@@ -57,23 +57,30 @@ def _predict(head: str, model: torch.nn.Module, batch: dict[str, torch.Tensor], 
         return model.forward_pair(obs_t, obs_n)
     if head == "diffusion":
         return model.sample(obs_t, obs_n)
+    if head == "knn":
+        return model(obs_t, obs_n)
     raise ValueError(head)
 
 
 def evaluate_cell(run_id: str, n_panels: int = 12, render_panels: bool = True) -> dict[str, Any]:
     cfg = _load_cell_config(run_id)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_ds, val_ds, obs_dim, action_dim = build_dataset(cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder)
-    model = build_head(cfg, obs_dim, action_dim).to(device)
-
-    blob = torch.load(CheckpointDir(run_id).best(), map_location=device, weights_only=False)
-    model.load_state_dict(blob["model_state_dict"])
-    model.eval()
+    train_ds, val_ds, obs_dim, action_dim = build_dataset(
+        cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder, action_norm_mode=cfg.action_norm_mode,
+    )
 
     mem: FeatureMemoryBank | None = None
-    if cfg.head == "raid":
-        mem = FeatureMemoryBank(obs_dim=obs_dim, action_dim=action_dim, max_entries=200_000, device=device)
+    if cfg.head in {"raid", "knn"}:
+        mem = FeatureMemoryBank(
+            obs_dim=obs_dim, action_dim=action_dim,
+            max_entries=max(200_000, len(train_ds) + 1024), device=device,
+        )
         mem.populate_from_dataset(train_ds, desc="Eval bank", obs_t_key="obs_t", obs_next_key="obs_next")
+
+    model = build_head(cfg, obs_dim, action_dim, memory=mem).to(device)
+    blob = torch.load(CheckpointDir(run_id).best(), map_location=device, weights_only=False)
+    model.load_state_dict(blob["model_state_dict"], strict=False)
+    model.eval()
 
     va_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
     sse = 0.0

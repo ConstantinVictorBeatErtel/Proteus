@@ -11,7 +11,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from v2.heads import DiffusionPolicyIDM, TransformerIDM
+from v2.heads import DiffusionPolicyIDM, KNNRetrievalHead, TransformerIDM
+from v2.legacy.memory import FeatureMemoryBank
 from v2.legacy.models import DirectMLP, RAIDDecoder
 
 
@@ -82,6 +83,39 @@ def test_diffusion_idm_loss_decreases():
         if step >= 380:
             final_losses.append(loss.item())
     assert sum(final_losses) / len(final_losses) < sum(initial_losses) / len(initial_losses)
+
+
+def test_knn_retrieval_head_smoke():
+    """kNN should produce non-trivial retrieval predictions and be a no-op under training."""
+    obs_dim = 19
+    n = 256
+    obs_t, obs_next, a = _synth(n, obs_dim=obs_dim)
+    mem = FeatureMemoryBank(obs_dim=obs_dim, action_dim=7, max_entries=n + 1, device="cpu")
+    for i in range(n):
+        mem.add(obs_t[i], obs_next[i], a[i])
+
+    head = KNNRetrievalHead(memory=mem, k=3)
+    pred = head(obs_t[:32], obs_next[:32])
+    assert pred.shape == (32, 7)
+    # The retrieved actions are pooled from the closest 3 transitions; for
+    # the very first query the closest match is itself, so the prediction
+    # should be close to the ground truth.
+    init_loss = torch.nn.functional.mse_loss(pred, a[:32]).item()
+    assert init_loss < 1.0
+
+    # The single dummy parameter should produce a finite gradient via the
+    # ``+ 0.0 * self._dummy.sum()`` term, but the gradient is identically
+    # zero so AdamW.step() is a true no-op.
+    opt = torch.optim.AdamW(head.parameters(), lr=1e-3)
+    pred = head(obs_t, obs_next)
+    loss = torch.nn.functional.mse_loss(pred, a)
+    loss.backward()
+    grads_zero = all(
+        (p.grad is None) or torch.equal(p.grad, torch.zeros_like(p.grad))
+        for p in head.parameters()
+    )
+    assert grads_zero
+    opt.step()
 
 
 def test_visualize_action_panel_only(tmp_path):
