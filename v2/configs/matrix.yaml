@@ -1,0 +1,79 @@
+# Experimental matrix.
+#
+# Each phase expands as the cartesian product of its `heads`, `datasets`,
+# `n_demos`, `seeds`, and `encoders` lists. The matrix runner checks each
+# cell's run_id against the artifact root and skips already-completed
+# work, so re-running after a Colab disconnect is idempotent.
+#
+# Phases A-F follow the strategy doc; they are experimental-design
+# identifiers, not schedule identifiers.
+
+phases:
+  # Reproduce the legacy autoresearch baseline on RoboMimic Lift PH
+  # low-dim under the new harness so v2 numbers are directly
+  # comparable to configs/results.json on main.
+  - id: A
+    heads: [direct_mlp, raid]
+    datasets: [robomimic_lift_ph_low_dim]
+    n_demos: [25, 50, 100, 200]
+    seeds: [42, 1337, 2024]
+    epochs: 50
+    batch_size: 256
+
+  # Cross-dataset state-only IDM on the four RoboMimic tasks. We mix
+  # PH and MH variants by listing them as parallel datasets; the
+  # MixedIDMDataset wrapper takes care of per-dataset z-score and
+  # the optional dataset-id token.
+  - id: B
+    heads: [direct_mlp, transformer, diffusion]
+    datasets:
+      - mixed_robomimic_lowdim_full
+      - mixed_robomimic_lowdim_subset25
+    n_demos: [200]
+    seeds: [42, 1337, 2024]
+    epochs: 50
+
+  # Image-feature IDM (the new core). Two image datasets x DINOv2
+  # CLS features. Cached safetensors are read from
+  # <artifact_root>/features/<dataset>_dinov2_cls.safetensors.
+  - id: C
+    heads: [direct_mlp, raid, transformer, diffusion]
+    datasets:
+      - robomimic_square_ph_image
+      - libero_spatial
+    n_demos: [50, 200]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    epochs: 50
+
+  # Encoder ablation: swap DINOv2 -> Theia on the best-of-C head.
+  # The runner reads the best head off the C-row aggregate and
+  # substitutes it; we list both heads here so dry-run still
+  # enumerates correctly.
+  - id: D
+    heads: [transformer]
+    datasets: [robomimic_square_ph_image]
+    n_demos: [200]
+    seeds: [42, 1337, 2024]
+    encoders: [theia]
+    epochs: 50
+
+  # Multi-task retrieval test on LIBERO-Goal pooled across tasks.
+  # Hypothesis: RAID closes or exceeds DirectMLP at small per-task
+  # demos, the headline retrieval claim of the project.
+  - id: E
+    heads: [direct_mlp, raid]
+    datasets: [libero_goal]
+    n_demos: [50]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    epochs: 50
+
+  # Optional GR00T-N1.5 LoRA stretch goal on a single dataset.
+  - id: F
+    heads: [groot_n15_lora]
+    datasets: [libero_spatial]
+    n_demos: [200]
+    seeds: [42]
+    encoders: [native]
+    epochs: 30

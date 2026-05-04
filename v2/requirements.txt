@@ -1,0 +1,12 @@
+torch>=2.1
+numpy
+h5py
+tqdm
+pyyaml
+safetensors>=0.4
+huggingface_hub>=0.23
+datasets>=2.18
+transformers>=4.40
+wandb>=0.16
+pyarrow>=14
+matplotlib
