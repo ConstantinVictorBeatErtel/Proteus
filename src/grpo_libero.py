@@ -22,6 +22,10 @@ from pathlib import Path
 os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 
+# Force unbuffered stdout for real-time log visibility
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -86,12 +90,8 @@ def grpo_train(
         successes = [s for _, _, s in rollouts]
 
         if rewards.std() < 1e-6:
-            log.append({"update": update, "success_rate": 0.0,
-                        "mean_reward": float(rewards.mean()), "skipped": True})
-            Path(log_path).write_text(json.dumps(log, indent=2))
-            if update % log_every == 0:
-                print(f"update {update:4d} | skip (constant rewards {rewards.mean():.2f})")
-            continue
+            # Add tiny noise so advantages are non-zero, keeping entropy alive
+            rewards = rewards + torch.randn_like(rewards) * 1e-4
 
         advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
@@ -217,29 +217,36 @@ def main():
         problem_info = _json.loads(f["data"].attrs.get("problem_info", "{}"))
         language = problem_info.get("language_instruction", "robot manipulation").strip('"\'')
 
-    print(f"Task: {language}")
-    print(f"Making LIBERO env ...")
+    print(f"Task: {language}", flush=True)
+    print(f"Making LIBERO env ...", flush=True)
 
-    # Try to make env from bddl (LIBERO stores bddl files in its package)
-    try:
-        from libero.libero import benchmark as bm_mod
-        bm = bm_mod.get_benchmark_dict()["libero_spatial"]()
-        bddl_file = bm.get_task_bddl_file_path(task_idx)
-        from libero.libero.envs import OffScreenRenderEnv
-        env = OffScreenRenderEnv(**{
-            "bddl_file_name": bddl_file,
-            "camera_heights": 128,
-            "camera_widths": 128,
-        })
-        print(f"  LIBERO env ready (task {task_idx}: {bddl_file.split('/')[-1]})")
-    except Exception as e:
-        print(f"  [WARN] Could not create LIBERO env: {e}")
-        print("  Falling back to 5-update dry run without env ...")
-        env = None
+    # Build path to BDDL file directly (avoids interactive benchmark prompt)
+    _libero_root = Path("/home/ubuntu/LIBERO/libero/libero")
+    _bddl_dir = _libero_root / "bddl_files" / "libero_spatial"
+    _bddl_files = sorted(_bddl_dir.glob("*.bddl")) if _bddl_dir.exists() else []
 
-    if env is None:
-        print("No environment available. Exiting.")
-        return
+    if len(_bddl_files) > task_idx:
+        bddl_file = str(_bddl_files[task_idx])
+    else:
+        # Fallback: use benchmark API with stdin redirect
+        import sys as _sys
+        _orig_stdin = _sys.stdin
+        _sys.stdin = open("/dev/null")
+        try:
+            from libero.libero import benchmark as bm_mod
+            bm = bm_mod.get_benchmark_dict()["libero_spatial"]()
+            bddl_file = bm.get_task_bddl_file_path(task_idx)
+        finally:
+            _sys.stdin = _orig_stdin
+
+    print(f"  BDDL: {Path(bddl_file).name}", flush=True)
+    from libero.libero.envs import OffScreenRenderEnv
+    env = OffScreenRenderEnv(**{
+        "bddl_file_name": bddl_file,
+        "camera_heights": 128,
+        "camera_widths": 128,
+    })
+    print(f"  LIBERO env ready", flush=True)
 
     # --- Run GRPO ---
     grpo_train(
