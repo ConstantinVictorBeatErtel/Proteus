@@ -47,9 +47,16 @@ class MixedIDMDataset(Dataset):
         raise IndexError(global_idx)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        member, local = self.member_for(int(idx))
+        gidx = int(idx)
+        member, local = self.member_for(gidx)
         ex = member.ds[local]  # type: ignore[index]
         ex = dict(ex)
+        # Override ``idx`` with the global mixed-dataset index. The
+        # FeatureMemoryBank's ``populate_vectorized`` stacks members
+        # contiguously, so a child's local index is *not* the bank
+        # row — the global idx is. Without this override, RAID's
+        # ``exclude_idx`` during training would mask the wrong bank row.
+        ex["idx"] = torch.tensor(gidx, dtype=torch.long)
         ex["dataset_id"] = torch.tensor(member.dataset_id, dtype=torch.long)
         ex["dataset_name"] = member.name
         return ex

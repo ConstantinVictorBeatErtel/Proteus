@@ -99,6 +99,7 @@ def main() -> None:
         return
 
     started = time.time()
+    n_failed = 0
     for i, cfg in enumerate(cells, 1):
         if _completed(cfg):
             print(f"[run_matrix] [{i}/{len(cells)}] SKIP completed run_id={cfg.run_id}")
@@ -110,14 +111,30 @@ def main() -> None:
             f"dataset={cfg.dataset} n_demos={cfg.n_demos} seed={cfg.seed} "
             f"action_norm={cfg.action_norm_mode} run_id={cfg.run_id}"
         )
-        out = train_cell(cfg, project=args.project)
+        try:
+            out = train_cell(cfg, project=args.project)
+        except Exception as exc:  # noqa: BLE001 — never let one cell kill the matrix
+            n_failed += 1
+            print(f"[run_matrix] FAIL  run_id={cfg.run_id}: {exc!r}")
+            continue
         print(f"[run_matrix] DONE  best_val_mse={out['best_val_mse']:.6f} elapsed={time.time() - started:.0f}s")
         if not args.no_eval:
             _safe_eval(cfg.run_id, args.n_panels)
 
+    print(f"[run_matrix] FINISHED ok={len(cells) - n_failed}/{len(cells)} failed={n_failed}")
+
 
 def _safe_eval(run_id: str, n_panels: int) -> None:
-    """Run evaluation + prediction-panel render, never killing the matrix on failure."""
+    """Run evaluation + prediction-panel render, never killing the matrix on failure.
+
+    Skips the entire eval pass if the grid figure already exists for this
+    ``run_id`` so re-runs of an already-evaluated matrix are cheap.
+    """
+    from .runtime.drive import results_root
+
+    grid_path = results_root() / "figures" / "predictions" / run_id / "grid.png"
+    if grid_path.is_file():
+        return
     try:
         from .evaluate import evaluate_cell
 
