@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
@@ -21,6 +22,91 @@ class _Member:
     ds: Dataset
     dataset_id: int
     length: int
+
+
+def _infer_obs_dim(ds: Dataset) -> int:
+    for attr in ("obs_dim", "state_dim", "feature_dim"):
+        value = getattr(ds, attr, None)
+        if value is not None:
+            return int(value)
+    if len(ds) == 0:  # type: ignore[arg-type]
+        raise ValueError("cannot infer obs dim from an empty dataset")
+    ex = ds[0]  # type: ignore[index]
+    for key in ("obs_t", "s_t"):
+        if key in ex:
+            return int(ex[key].shape[-1])
+    raise ValueError(f"cannot infer obs dim for dataset type {type(ds).__name__}")
+
+
+class PaddedObservationDataset(Dataset):
+    """Right-pad observation vectors so mixed-task low-dim cells can run."""
+
+    def __init__(self, base: Dataset, target_obs_dim: int) -> None:
+        self.base = base
+        self.source_obs_dim = _infer_obs_dim(base)
+        self.target_obs_dim = int(target_obs_dim)
+        self.obs_dim = self.target_obs_dim
+        self.action_dim = int(getattr(base, "action_dim", 7))
+        self._pad_right = self.target_obs_dim - self.source_obs_dim
+        if self._pad_right < 0:
+            raise ValueError(
+                f"target_obs_dim={self.target_obs_dim} is smaller than source_obs_dim={self.source_obs_dim}"
+            )
+        self.obs_mask = torch.cat(
+            [
+                torch.ones(self.source_obs_dim, dtype=torch.bool),
+                torch.zeros(self._pad_right, dtype=torch.bool),
+            ]
+        )
+
+    def __len__(self) -> int:
+        return len(self.base)  # type: ignore[arg-type]
+
+    def _pad_obs(self, x: torch.Tensor) -> torch.Tensor:
+        if self._pad_right == 0:
+            return x
+        return F.pad(x, (0, self._pad_right))
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        ex = dict(self.base[int(idx)])  # type: ignore[index]
+        for key in ("obs_t", "obs_next", "s_t", "s_next"):
+            if key in ex:
+                ex[key] = self._pad_obs(ex[key])
+        if "obs_window" in ex:
+            ex["obs_window"] = F.pad(ex["obs_window"], (0, self._pad_right))
+        ex["obs_mask"] = self.obs_mask.clone()
+        return ex
+
+    def _stack_with_padding(self, fn_name: str, key: str) -> torch.Tensor:
+        getter = getattr(self.base, fn_name, None)
+        if getter is None:
+            rows = [self[i][key] for i in range(len(self))]  # type: ignore[index]
+            return torch.stack(rows, dim=0)
+        return self._pad_obs(getter(key))
+
+    def stacked_obs_t(self, key: str = "obs_t") -> torch.Tensor:
+        return self._stack_with_padding("stacked_obs_t", key)
+
+    def stacked_obs_next(self, key: str = "obs_next") -> torch.Tensor:
+        return self._stack_with_padding("stacked_obs_next", key)
+
+    def stacked_actions(self, key: str = "action") -> torch.Tensor:
+        getter = getattr(self.base, "stacked_actions", None)
+        if getter is None:
+            rows = [self.base[i][key] for i in range(len(self.base))]  # type: ignore[index]
+            return torch.stack(rows, dim=0)
+        return getter(key)
+
+    def stacked_obs_window(self, key: str = "obs_window") -> torch.Tensor:
+        getter = getattr(self.base, "stacked_obs_window", None)
+        if getter is None:
+            rows = [self[i][key] for i in range(len(self))]  # type: ignore[index]
+            return torch.stack(rows, dim=0)
+        return F.pad(getter(key), (0, self._pad_right))
+
+    def fetch_frames(self, idx: int) -> tuple[Any, Any]:
+        fetcher = getattr(self.base, "fetch_frames")
+        return fetcher(int(idx))
 
 
 class MixedIDMDataset(Dataset):
@@ -88,3 +174,6 @@ class MixedIDMDataset(Dataset):
 
     def stacked_actions(self, key: str = "action") -> torch.Tensor:
         return self._concat_member_stack("stacked_actions", key)
+
+    def stacked_obs_window(self, key: str = "obs_window") -> torch.Tensor:
+        return self._concat_member_stack("stacked_obs_window", key)

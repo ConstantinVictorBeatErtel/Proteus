@@ -12,6 +12,8 @@ import pytest
 import torch
 
 from v2.heads import DiffusionPolicyIDM, KNNRetrievalHead, TransformerIDM
+from v2.datasets.libero import suite_config_name
+from v2.datasets.mixed import MixedIDMDataset, PaddedObservationDataset
 from v2.legacy.memory import FeatureMemoryBank
 from v2.legacy.models import DirectMLP, RAIDDecoder
 
@@ -136,3 +138,61 @@ def test_visualize_action_panel_only(tmp_path):
     )
     assert out.is_file()
     assert out.stat().st_size > 1000  # non-trivial PNG
+
+
+def test_mixed_dataset_padding_preserves_global_indices():
+    class _ToyDataset:
+        def __init__(self, obs_dim: int, length: int = 3):
+            self.obs_dim = obs_dim
+            self.action_dim = 7
+            self._obs_t = torch.randn(length, obs_dim)
+            self._obs_next = torch.randn(length, obs_dim)
+            self._obs_window = torch.randn(length, 4, obs_dim)
+            self._action = torch.randn(length, 7)
+
+        def __len__(self):
+            return int(self._obs_t.shape[0])
+
+        def __getitem__(self, idx: int):
+            i = int(idx)
+            return {
+                "obs_t": self._obs_t[i],
+                "obs_next": self._obs_next[i],
+                "s_t": self._obs_t[i],
+                "s_next": self._obs_next[i],
+                "obs_window": self._obs_window[i],
+                "action": self._action[i],
+                "idx": torch.tensor(i, dtype=torch.long),
+            }
+
+        def stacked_obs_t(self, _key="obs_t"):
+            return self._obs_t
+
+        def stacked_obs_next(self, _key="obs_next"):
+            return self._obs_next
+
+        def stacked_obs_window(self, _key="obs_window"):
+            return self._obs_window
+
+        def stacked_actions(self, _key="action"):
+            return self._action
+
+    mixed = MixedIDMDataset(
+        [
+            ("small", PaddedObservationDataset(_ToyDataset(obs_dim=5), target_obs_dim=8)),
+            ("wide", PaddedObservationDataset(_ToyDataset(obs_dim=8), target_obs_dim=8)),
+        ]
+    )
+    ex0 = mixed[0]
+    ex3 = mixed[3]
+    assert ex0["obs_t"].shape[-1] == 8
+    assert ex0["obs_window"].shape[-1] == 8
+    assert ex0["idx"].item() == 0
+    assert ex3["idx"].item() == 3
+    assert mixed.stacked_obs_t().shape[-1] == 8
+
+
+def test_libero_suite_config_names():
+    assert suite_config_name("libero_spatial") == "libero_spatial_no_noops"
+    assert suite_config_name("libero_object") == "libero_object_no_noops"
+    assert suite_config_name("libero_goal") == "libero_goal_no_noops"

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .drive import data_root
+from ..datasets.libero import LIBERO_SUITES, suite_config_name
 
 
 # RoboMimic v0.1 — the official ARISE-Initiative HF repo. The legacy
@@ -50,7 +51,6 @@ ROBOMIMIC_IMAGE_TASKS = ("can", "square")
 
 # LIBERO via OpenVLA-aligned RLDS.
 LIBERO_REPO = "openvla/modified_libero_rlds"
-LIBERO_SUITES = ("libero_spatial", "libero_object", "libero_goal")
 
 
 def repo_root() -> Path:
@@ -195,24 +195,32 @@ def libero_cache_dir() -> Path:
     return p
 
 
+def _libero_suite_dirs(cache: Path, suite: str) -> list[Path]:
+    config_name = suite_config_name(suite)
+    return sorted(p for p in cache.glob(f"**/{config_name}/1.0.0") if p.is_dir())
+
+
 def download_libero(suites: Iterable[str] = LIBERO_SUITES) -> list[DownloadResult]:
     """Pull LIBERO suites from ``openvla/modified_libero_rlds`` into the HF cache.
 
-    Uses ``datasets.load_dataset`` so the parquet shards live in
-    ``<artifact_root>/data/libero/<suite>/...``.
+    Uses ``datasets.load_dataset`` so the prepared Arrow/TFDS cache
+    lives somewhere under ``<artifact_root>/data/libero``.
     """
     from datasets import load_dataset  # local import
 
     cache = libero_cache_dir()
     out: list[DownloadResult] = []
     for suite in suites:
-        suite_dir = cache / suite
-        existing = _dir_size(suite_dir)
+        suite_dirs = _libero_suite_dirs(cache, suite)
+        existing = max((_dir_size(p) for p in suite_dirs), default=0)
         if existing > 100_000_000:
-            out.append(DownloadResult(LIBERO_REPO, suite_dir, skipped=True, bytes_on_disk=existing))
+            local_dir = max(suite_dirs, key=_dir_size)
+            out.append(DownloadResult(LIBERO_REPO, local_dir, skipped=True, bytes_on_disk=existing))
             continue
-        load_dataset(LIBERO_REPO, name=suite, cache_dir=str(cache))
-        out.append(DownloadResult(LIBERO_REPO, suite_dir, skipped=False, bytes_on_disk=_dir_size(suite_dir)))
+        load_dataset(LIBERO_REPO, name=suite_config_name(suite), cache_dir=str(cache), split="train")
+        suite_dirs = _libero_suite_dirs(cache, suite)
+        local_dir = suite_dirs[0] if suite_dirs else (cache / suite_config_name(suite))
+        out.append(DownloadResult(LIBERO_REPO, local_dir, skipped=False, bytes_on_disk=_dir_size(local_dir)))
     return out
 
 

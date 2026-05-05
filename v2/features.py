@@ -19,14 +19,21 @@ exactly what the encoder ingested.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import torch
 
 from .runtime.drive import atomic_write_bytes, features_root
+from .datasets.cache_layout import (
+    FeatureCacheMetadata,
+    feature_cache_path,
+    layout_checksum,
+    load_feature_cache_metadata,
+    write_feature_cache_metadata,
+)
 
 
 ENCODER_MAP: dict[str, str] = {
@@ -102,14 +109,42 @@ def extract_dataset_features(
     frame_iter: Iterable[np.ndarray],
     encoder: EncoderHandle,
     expected_count: int | None = None,
+    episode_layout_entries: Iterable[tuple[str, int]] | None = None,
     device: torch.device | str = "cuda",
     batch_size: int = 64,
     sample_preview: bool = True,
 ) -> Path:
     """Iterate over frames in batches, write CLS features safetensors."""
-    target = features_root() / f"{dataset_name}_{encoder.name}_cls.safetensors"
-    if target.is_file() and target.stat().st_size > 1_000_000:
-        print(f"[features] SKIP {target} (already exists, {target.stat().st_size / 1e6:.1f} MB)")
+    target = feature_cache_path(dataset_name, encoder.name)
+    existing_meta = load_feature_cache_metadata(target)
+    layout_entries = list(episode_layout_entries or [])
+    expected_layout_checksum = layout_checksum(layout_entries) if layout_entries else None
+    if target.is_file() and target.stat().st_size > 1_000_000 and existing_meta is not None:
+        layout_matches = (
+            expected_layout_checksum is None
+            or existing_meta.layout_checksum == expected_layout_checksum
+        )
+        count_matches = expected_count is None or existing_meta.frame_count == int(expected_count)
+        if layout_matches and count_matches:
+            print(f"[features] SKIP {target} (already exists, {target.stat().st_size / 1e6:.1f} MB)")
+            return target
+        print(f"[features] REBUILD {target} (stale metadata vs current dataset layout)")
+    if target.is_file() and target.stat().st_size > 1_000_000 and existing_meta is None and layout_entries:
+        from safetensors.torch import load_file
+
+        existing = load_file(str(target))["features"]
+        write_feature_cache_metadata(
+            FeatureCacheMetadata(
+                dataset_name=dataset_name,
+                encoder=encoder.name,
+                frame_count=int(existing.shape[0]),
+                feature_dim=int(existing.shape[1]),
+                episode_count=len(layout_entries),
+                layout_checksum=expected_layout_checksum or "",
+            ),
+            target,
+        )
+        print(f"[features] added metadata sidecar for existing cache {target}")
         return target
 
     pieces: list[torch.Tensor] = []
@@ -133,6 +168,17 @@ def extract_dataset_features(
     if expected_count is not None and feats.shape[0] != expected_count:
         raise RuntimeError(f"feature count mismatch: got {feats.shape[0]}, expected {expected_count}")
     out = _write_safetensors(feats, target)
+    write_feature_cache_metadata(
+        FeatureCacheMetadata(
+            dataset_name=dataset_name,
+            encoder=encoder.name,
+            frame_count=int(feats.shape[0]),
+            feature_dim=int(feats.shape[1]),
+            episode_count=len(layout_entries),
+            layout_checksum=expected_layout_checksum or "",
+        ),
+        out,
+    )
     print(f"[features] wrote {out} shape={tuple(feats.shape)} dtype=fp16 size={out.stat().st_size / 1e6:.1f} MB")
 
     if sample_preview and preview_buf:
@@ -147,7 +193,7 @@ def extract_dataset_features(
 def load_features(dataset_name: str, encoder: str) -> torch.Tensor:
     from safetensors.torch import load_file
 
-    target = features_root() / f"{dataset_name}_{encoder}_cls.safetensors"
+    target = feature_cache_path(dataset_name, encoder)
     if not target.is_file():
         raise FileNotFoundError(target)
     return load_file(str(target))["features"]
@@ -182,14 +228,16 @@ def main() -> None:
             import h5py
 
             with h5py.File(hp, "r") as f:
-                count = sum(int(f["data"][dk]["actions"].shape[0]) for dk in f["data"])
+                sorted_keys = sorted(f["data"], key=lambda x: int(x.split("_")[1]))
+                layout_entries = [(dk, int(f["data"][dk]["actions"].shape[0])) for dk in sorted_keys]
+                count = sum(length for _, length in layout_entries)
 
             def _frames_iter() -> Iterable[np.ndarray]:
                 with h5py.File(hp, "r") as f:
-                    for dk in sorted(f["data"], key=lambda x: int(x.split("_")[1])):
-                        arr = np.asarray(f["data"][dk]["obs"][rm.IMAGE_OBS_KEY])
-                        for i in range(arr.shape[0]):
-                            yield arr[i]
+                    for dk, _length in layout_entries:
+                        dset = f["data"][dk]["obs"][rm.IMAGE_OBS_KEY]
+                        for i in range(int(dset.shape[0])):
+                            yield np.asarray(dset[i], dtype=np.uint8)
 
             for enc_name, enc in encoders.items():
                 extract_dataset_features(
@@ -197,31 +245,23 @@ def main() -> None:
                     frame_iter=_frames_iter(),
                     encoder=enc,
                     expected_count=count,
+                    episode_layout_entries=layout_entries,
                     device=device,
                     batch_size=args.batch_size,
                 )
         elif dname.startswith("libero_"):
             spec = lb.LiberoSpec(suite=dname)
-            from datasets import load_dataset
-
-            ds = load_dataset(lb.LIBERO_REPO, name=spec.suite, cache_dir=str(data_root() / "libero"), split="train")
-
-            def _frames_iter_l() -> Iterable[np.ndarray]:
-                for row in ds:
-                    steps = row.get("steps") or row
-                    for step in steps:
-                        obs = step["observation"]
-                        img = obs.get("image") or obs.get("agentview_rgb") or obs.get("agentview_image")
-                        if img is None:
-                            continue
-                        yield np.asarray(img, dtype=np.uint8)
+            ds = lb._load_hf_dataset(spec.suite, data_root() / "libero")
+            layout_entries = lb.episode_layout(ds)
+            count = sum(length for _, length in layout_entries)
 
             for enc_name, enc in encoders.items():
                 extract_dataset_features(
                     dataset_name=dname,
-                    frame_iter=_frames_iter_l(),
+                    frame_iter=lb.iter_episode_frames(ds),
                     encoder=enc,
-                    expected_count=None,
+                    expected_count=count,
+                    episode_layout_entries=layout_entries,
                     device=device,
                     batch_size=args.batch_size,
                 )

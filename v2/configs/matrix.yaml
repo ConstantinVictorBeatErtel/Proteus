@@ -24,11 +24,9 @@ phases:
     action_norm: zscore
 
   # Phase B: cross-dataset state-only IDM on the four RoboMimic tasks
-  # (PH+MH). The MixedIDMDataset wrapper concatenates the children. Note
-  # that RoboMimic ``object`` width varies per task, so this phase only
-  # runs cleanly when all tasks happen to share the same low-dim state
-  # width; otherwise the runner errors with a clear message and you
-  # should use the image-feature variant from phase C instead.
+  # (PH+MH). The MixedIDMDataset wrapper concatenates the children and
+  # right-pads narrower low-dim states up to the widest task so the
+  # matrix can run without per-task shape special-casing.
   - id: B
     heads: [direct_mlp, transformer, diffusion]
     datasets:
@@ -46,8 +44,6 @@ phases:
     heads: [direct_mlp, raid, transformer, diffusion]
     datasets:
       - robomimic_square_ph_image
-      # libero_spatial pending RLDS schema verification; see
-      # v2/datasets/cached.py for the placeholder.
     n_demos: [50, 200]
     seeds: [42, 1337, 2024]
     encoders: [dinov2]
@@ -65,15 +61,14 @@ phases:
     action_norm: q01_q99
 
   # Phase E: multi-task retrieval test on LIBERO-Goal pooled across tasks.
-  # Pending the LIBERO RLDS schema fix in v2/datasets/cached.py.
-  # - id: E
-  #   heads: [direct_mlp, raid]
-  #   datasets: [libero_goal]
-  #   n_demos: [50]
-  #   seeds: [42, 1337, 2024]
-  #   encoders: [dinov2]
-  #   epochs: 50
-  #   action_norm: q01_q99
+  - id: E
+    heads: [direct_mlp, raid]
+    datasets: [libero_goal]
+    n_demos: [50]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    epochs: 50
+    action_norm: q01_q99
 
   # Phase F: optional GR00T-N1.5 LoRA stretch goal. Out of scope by
   # default; uncomment once the loader has been wired against

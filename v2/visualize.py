@@ -68,8 +68,14 @@ def _action_bar_panel(ax, action_gt: np.ndarray, action_pred: np.ndarray | None)
 
 def _state_panel(ax, state_t: np.ndarray, state_next: np.ndarray, action_gt: np.ndarray) -> None:
     """Fallback panel when no image frames are available."""
-    eef_t = state_t[10:13] if state_t.shape[0] >= 13 else state_t[:3]
-    eef_n = state_next[10:13] if state_next.shape[0] >= 13 else state_next[:3]
+    if state_t.shape[0] >= 9 and state_next.shape[0] >= 9:
+        # RoboMimic low-dim layout is ``object + eef_pos + eef_quat + gripper``;
+        # the object block width varies by task, but the last 9 dims are stable.
+        eef_t = state_t[-9:-6]
+        eef_n = state_next[-9:-6]
+    else:
+        eef_t = state_t[:3]
+        eef_n = state_next[:3]
     ax.set_aspect("equal")
     ax.scatter([eef_t[0]], [eef_t[1]], color="#3b6cd1", s=60, label="t")
     ax.scatter([eef_n[0]], [eef_n[1]], color="#d97043", s=60, label="t+1")

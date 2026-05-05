@@ -9,8 +9,8 @@ val split, and emit:
     written; defaults to 12 evenly-spaced indices.
   * ``<artifact_root>/results/figures/predictions/<run_id>/grid.png`` —
     a single grid figure for at-a-glance review.
-  * Aggregate MSE / contact-MSE / per-DOF MSE appended to
-    ``<artifact_root>/results/matrix.parquet``.
+  * Aggregate MSE / contact-MSE / per-DOF MSE written to
+    ``<artifact_root>/runs/<run_id>/metrics.json``.
 """
 
 from __future__ import annotations
@@ -54,7 +54,8 @@ def _predict(head: str, model: torch.nn.Module, batch: dict[str, torch.Tensor], 
         prior = _pooled_retrieved(retr.to(device), mk.to(device))
         return model(obs_t, obs_n, prior)
     if head == "transformer":
-        return model.forward_pair(obs_t, obs_n)
+        obs_window = batch.get("obs_window")
+        return model(obs_window.to(device)) if obs_window is not None else model.forward_pair(obs_t, obs_n)
     if head == "diffusion":
         return model.sample(obs_t, obs_n)
     if head == "knn":

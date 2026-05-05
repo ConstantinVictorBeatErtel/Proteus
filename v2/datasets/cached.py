@@ -8,11 +8,11 @@ walks the same demos to reconstruct ``(demo_key, t)`` for each
 transition so visualization can still pull raw RGB frames from the
 underlying HDF5 / RLDS source.
 
-Implementation status: this module ships the **RoboMimic** branch
-end-to-end and a **placeholder** LIBERO branch that raises with a
-clear pointer when called. The LIBERO RLDS schema differs across
-``openvla/modified_libero_rlds`` revisions, so the agent that runs on
-Colab must verify the schema before this branch is enabled.
+This module ships both the **RoboMimic** and **LIBERO** image-feature
+branches end-to-end. Each cached safetensors file carries a small
+metadata sidecar; loaders verify frame count and row-order checksum
+before training so stale caches fail loudly instead of silently
+misaligning transitions.
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from ..runtime.drive import data_root, features_root
+from ..runtime.drive import data_root
+from . import libero as lb
+from .cache_layout import feature_cache_path, load_feature_cache_metadata, layout_checksum
 from .robomimic import IMAGE_OBS_KEY, RoboMimicSpec, hdf5_path_for, read_frames
 from .stats import ActionStats, compute_action_stats
 
@@ -41,11 +43,15 @@ class _Transition:
     demo_key: str
     t: int
 
+    @property
+    def feat_base_idx(self) -> int:
+        return self.feat_t_idx - self.t
+
 
 def _load_features(dataset_name: str, encoder: str) -> torch.Tensor:
     from safetensors.torch import load_file
 
-    target = features_root() / f"{dataset_name}_{encoder}_cls.safetensors"
+    target = feature_cache_path(dataset_name, encoder)
     if not target.is_file():
         raise FileNotFoundError(
             f"missing cached features: {target}\n"
@@ -85,8 +91,21 @@ class FeatureCachedDataset(Dataset):
         if transitions:
             t_idx = torch.tensor([tr.feat_t_idx for tr in transitions], dtype=torch.long)
             n_idx = torch.tensor([tr.feat_next_idx for tr in transitions], dtype=torch.long)
+            w_idx = torch.tensor(
+                [
+                    [
+                        tr.feat_base_idx + max(0, tr.t - 2),
+                        tr.feat_base_idx + max(0, tr.t - 1),
+                        tr.feat_t_idx,
+                        tr.feat_next_idx,
+                    ]
+                    for tr in transitions
+                ],
+                dtype=torch.long,
+            )
             self._t_idx = t_idx
             self._n_idx = n_idx
+            self._w_idx = w_idx
             raw_actions = torch.from_numpy(np.stack([tr.action for tr in transitions], axis=0).astype(np.float32, copy=False))
             self._raw_actions = raw_actions
             if action_norm_mode == "zscore":
@@ -100,6 +119,7 @@ class FeatureCachedDataset(Dataset):
         else:
             self._t_idx = torch.zeros(0, dtype=torch.long)
             self._n_idx = torch.zeros(0, dtype=torch.long)
+            self._w_idx = torch.zeros(0, 4, dtype=torch.long)
             self._raw_actions = torch.zeros(0, 7, dtype=torch.float32)
             self._actions_norm = torch.zeros(0, 7, dtype=torch.float32)
             self._contacts = torch.zeros(0, dtype=torch.bool)
@@ -118,6 +138,7 @@ class FeatureCachedDataset(Dataset):
             "obs_next": f_n,
             "s_t": f_t,
             "s_next": f_n,
+            "obs_window": self.features.index_select(0, self._w_idx[i]),
             "action": self._actions_norm[i],
             "action_raw": self._raw_actions[i],
             "is_contact": self._contacts[i],
@@ -165,6 +186,34 @@ def _robomimic_image_feature_offsets(hdf5_path: Path) -> tuple[list[str], dict[s
     return keys, offsets
 
 
+def _verify_feature_layout(
+    dataset_name: str,
+    encoder: str,
+    features: torch.Tensor,
+    layout_entries: list[tuple[str, int]],
+) -> None:
+    target = feature_cache_path(dataset_name, encoder)
+    meta = load_feature_cache_metadata(target)
+    if meta is None:
+        raise RuntimeError(
+            f"cached features at {target} are missing their metadata sidecar. "
+            "Re-run `python3 -m v2.features` so row-order verification is available."
+        )
+    if meta.frame_count != int(features.shape[0]) or meta.feature_dim != int(features.shape[1]):
+        raise RuntimeError(
+            f"cached features at {target} have shape {tuple(features.shape)} but metadata says "
+            f"frame_count={meta.frame_count}, feature_dim={meta.feature_dim}. Re-extract features."
+        )
+    expected_checksum = layout_checksum(layout_entries)
+    if meta.layout_checksum != expected_checksum:
+        raise RuntimeError(
+            f"cached features at {target} do not match the current dataset layout "
+            f"(metadata checksum {meta.layout_checksum}, expected {expected_checksum}). "
+            "This usually means the features file was built against a different HDF5/RLDS order; "
+            "re-run `python3 -m v2.features` before training."
+        )
+
+
 def _split_keys(keys: list[str], n_demos: int, train_frac: float) -> tuple[list[str], list[str]]:
     subset = keys[: max(1, int(n_demos))]
     n_train = int(math.ceil(train_frac * len(subset)))
@@ -187,6 +236,7 @@ def _make_robomimic_image_cached(
 
     feats = _load_features(dataset_name, encoder)
     keys, offsets = _robomimic_image_feature_offsets(hdf5_path)
+    _verify_feature_layout(dataset_name, encoder, feats, [(k, offsets[k][1]) for k in keys])
     train_keys, val_keys = _split_keys(keys, n_demos, train_frac)
 
     def _build_transitions(demo_keys: list[str]) -> list[_Transition]:
@@ -233,6 +283,90 @@ def _make_robomimic_image_cached(
     return train_ds, val_ds, train_ds.feature_dim
 
 
+def _make_libero_image_cached(
+    dataset_name: str,
+    encoder: str,
+    n_demos: int,
+    action_norm_mode: str,
+    train_frac: float = 0.8,
+) -> tuple[FeatureCachedDataset, FeatureCachedDataset, int]:
+    feats = _load_features(dataset_name, encoder)
+    raw = lb._load_hf_dataset(dataset_name, data_root() / "libero")
+    layout_entries = lb.episode_layout(raw)
+    _verify_feature_layout(dataset_name, encoder, feats, layout_entries)
+
+    subset = layout_entries[: max(1, int(n_demos))]
+    n_train = int(math.ceil(train_frac * len(subset)))
+    train_keys = {demo_key for demo_key, _ in subset[:n_train]}
+    val_keys = {demo_key for demo_key, _ in subset[n_train:]}
+
+    demo_index: dict[str, int] = {}
+    offsets: dict[str, tuple[int, int]] = {}
+    cursor = 0
+    for row_idx, (demo_key, length) in enumerate(layout_entries):
+        demo_index[demo_key] = row_idx
+        offsets[demo_key] = (cursor, length)
+        cursor += length
+
+    def _build_transitions(demo_keys: set[str]) -> list[_Transition]:
+        out: list[_Transition] = []
+        for row_idx, (demo_key, length) in enumerate(layout_entries):
+            if demo_key not in demo_keys:
+                continue
+            row = raw[row_idx]
+            steps = lb._steps_for_row(row)
+            base, _ = offsets[demo_key]
+            for t in range(length - 1):
+                a_t = np.asarray(steps[t]["action"], dtype=np.float64)
+                a_next = np.asarray(steps[t + 1]["action"], dtype=np.float64)
+                contact = abs(float(a_next[6]) - float(a_t[6])) > 0.1
+                out.append(
+                    _Transition(
+                        feat_t_idx=base + t,
+                        feat_next_idx=base + t + 1,
+                        action=a_t.copy(),
+                        is_contact=bool(contact),
+                        demo_key=demo_key,
+                        t=int(t),
+                    )
+                )
+        return out
+
+    train_tr = _build_transitions(train_keys)
+    val_tr = _build_transitions(val_keys)
+    if not train_tr:
+        raise RuntimeError(f"empty train split for {dataset_name!r}")
+
+    train_actions = np.stack([tr.action for tr in train_tr], axis=0)
+    action_stats = compute_action_stats(train_actions)
+
+    def _resolve(demo_key: str, t: int) -> tuple[np.ndarray, np.ndarray]:
+        row = raw[demo_index[demo_key]]
+        steps = lb._steps_for_row(row)
+        return (
+            lb._image_from_observation(steps[int(t)]["observation"]),
+            lb._image_from_observation(steps[int(t) + 1]["observation"]),
+        )
+
+    train_ds = FeatureCachedDataset(
+        dataset_name=dataset_name,
+        features=feats,
+        transitions=train_tr,
+        action_stats=action_stats,
+        action_norm_mode=action_norm_mode,
+        frame_resolver=_resolve,
+    )
+    val_ds = FeatureCachedDataset(
+        dataset_name=dataset_name,
+        features=feats,
+        transitions=val_tr,
+        action_stats=action_stats,
+        action_norm_mode=action_norm_mode,
+        frame_resolver=_resolve,
+    )
+    return train_ds, val_ds, train_ds.feature_dim
+
+
 def build_feature_cached_train_val(
     dataset_name: str,
     encoder: str,
@@ -246,11 +380,7 @@ def build_feature_cached_train_val(
             dataset_name, encoder, n_demos, action_norm_mode, train_frac=train_frac
         )
     if dataset_name.startswith("libero_"):
-        raise NotImplementedError(
-            f"LIBERO feature-cached dataset {dataset_name!r}: the "
-            "openvla/modified_libero_rlds schema must be verified before this "
-            "branch is enabled. Inspect a sample row with "
-            "``datasets.load_dataset('openvla/modified_libero_rlds', name='libero_spatial', "
-            "split='train')[0].keys()`` and update v2/datasets/cached.py."
+        return _make_libero_image_cached(
+            dataset_name, encoder, n_demos, action_norm_mode, train_frac=train_frac
         )
     raise ValueError(f"unknown image-feature dataset: {dataset_name!r}")

@@ -108,8 +108,9 @@ def build_dataset(
       proprioceptive state.
     * ``mixed_robomimic_lowdim_full`` / ``mixed_robomimic_lowdim_subset25``
       — concatenation across all four single-arm RoboMimic tasks
-      (PH+MH); the ``subset25`` variant trims each child to 25% of the
-      requested demo count.
+      (PH+MH); narrower state vectors are right-padded to the widest
+      task so cross-task low-dim cells run cleanly. The ``subset25``
+      variant trims each child to 25% of the requested demo count.
     * ``robomimic_<task>_<variant>_image`` — RoboMimic image-feature
       cells; expects cached CLS features at
       ``<artifact_root>/features/<dataset>_<encoder>_cls.safetensors``.
@@ -131,7 +132,7 @@ def build_dataset(
 
     # Mixed-task RoboMimic low-dim.
     if dataset_name.startswith("mixed_robomimic_lowdim_"):
-        from .datasets.mixed import MixedIDMDataset
+        from .datasets.mixed import MixedIDMDataset, PaddedObservationDataset
 
         suffix = dataset_name[len("mixed_robomimic_lowdim_") :]
         scale = 1.0 if suffix in {"full", "100pct"} else 0.25 if suffix in {"subset25", "25pct"} else None
@@ -140,23 +141,24 @@ def build_dataset(
         per_task_n = max(1, int(round(n_demos * scale)))
         train_members: list[tuple[str, Dataset]] = []
         val_members: list[tuple[str, Dataset]] = []
-        state_dim = -1
+        max_state_dim = -1
+        pending: list[tuple[str, Dataset, Dataset, int]] = []
         for task, variant in _MIXED_LOWDIM_FULL:
             try:
                 tr, va, _stats, sd = _build_robomimic_lowdim(task, variant, per_task_n, action_norm_mode)
             except FileNotFoundError as exc:
                 print(f"[build_dataset] skipping {task}/{variant}: {exc}")
                 continue
-            if state_dim == -1:
-                state_dim = sd
-            elif sd != state_dim:
-                # RoboMimic ``object`` width varies per task. Bail clearly.
-                raise RuntimeError(
-                    f"state dim mismatch in mixed dataset: {task}/{variant} has {sd}, "
-                    f"earlier task had {state_dim}. Use image-feature inputs for cross-task "
-                    "mixing instead, or pad/truncate states explicitly."
-                )
             name = f"robomimic_{task}_{variant}_low_dim"
+            pending.append((name, tr, va, sd))
+            max_state_dim = max(max_state_dim, sd)
+        for name, tr, va, sd in pending:
+            if sd != max_state_dim:
+                print(
+                    f"[build_dataset] padding {name} from obs_dim={sd} to mixed obs_dim={max_state_dim}"
+                )
+                tr = PaddedObservationDataset(tr, target_obs_dim=max_state_dim)
+                va = PaddedObservationDataset(va, target_obs_dim=max_state_dim)
             train_members.append((name, tr))
             val_members.append((name, va))
         if not train_members:
@@ -164,7 +166,7 @@ def build_dataset(
                 "No RoboMimic tasks could be loaded for the mixed dataset; "
                 "run ``python3 -m v2.runtime.data_download`` first."
             )
-        return MixedIDMDataset(train_members), MixedIDMDataset(val_members), state_dim, 7
+        return MixedIDMDataset(train_members), MixedIDMDataset(val_members), max_state_dim, 7
 
     # Image-feature cells (RoboMimic image / LIBERO) — load cached features.
     if encoder is not None:
@@ -237,7 +239,8 @@ def _train_step(
         prior = _pooled_retrieved(retr.to(device), mk.to(device))
         pred = model(obs_t, obs_n, prior)
     elif head == "transformer":
-        pred = model.forward_pair(obs_t, obs_n)
+        obs_window = batch.get("obs_window")
+        pred = model(obs_window.to(device)) if obs_window is not None else model.forward_pair(obs_t, obs_n)
     elif head == "diffusion":
         if train:
             loss = model.loss(obs_t, obs_n, y)
@@ -328,7 +331,7 @@ def train_cell(cfg: CellConfig, project: str = "raid_v2") -> dict[str, Any]:
                 )
 
             now = time.time()
-            if now - last_ckpt_at > CKPT_INTERVAL_SEC or epoch == cfg.n_epochs:
+            if now - last_ckpt_at > CKPT_INTERVAL_SEC or epoch == effective_epochs:
                 atomic_save(
                     {
                         "model_state_dict": model.state_dict(),

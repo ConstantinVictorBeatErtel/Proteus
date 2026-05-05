@@ -253,6 +253,30 @@ class RoboMimicTransitionDataset(Dataset):
         self._contacts = torch.from_numpy(contacts)
         self._t_steps = torch.from_numpy(t_steps)
         self._demo_keys = demo_keys
+        self._obs_windows = self._build_obs_windows()
+
+    def _build_obs_windows(self) -> torch.Tensor:
+        if len(self._obs_t) == 0:
+            return torch.zeros(0, 4, self.state_dim, dtype=torch.float32)
+        demo_rows: dict[str, list[int]] = {}
+        for row_idx, demo_key in enumerate(self._demo_keys):
+            demo_rows.setdefault(demo_key, []).append(row_idx)
+        windows = []
+        for row_idx, demo_key in enumerate(self._demo_keys):
+            t = int(self._t_steps[row_idx].item())
+            rows = demo_rows[demo_key]
+            windows.append(
+                torch.stack(
+                    [
+                        self._obs_t[rows[max(0, t - 2)]],
+                        self._obs_t[rows[max(0, t - 1)]],
+                        self._obs_t[row_idx],
+                        self._obs_next[row_idx],
+                    ],
+                    dim=0,
+                )
+            )
+        return torch.stack(windows, dim=0)
 
     def __len__(self) -> int:
         return len(self.transitions)
@@ -264,6 +288,7 @@ class RoboMimicTransitionDataset(Dataset):
             "obs_next": self._obs_next[i],
             "s_t": self._obs_t[i],
             "s_next": self._obs_next[i],
+            "obs_window": self._obs_windows[i],
             "action": self._actions_norm[i],
             "action_raw": self._raw_actions[i],
             "is_contact": self._contacts[i],
@@ -283,6 +308,9 @@ class RoboMimicTransitionDataset(Dataset):
 
     def stacked_actions(self, key: str = "action") -> torch.Tensor:
         return self._actions_norm
+
+    def stacked_obs_window(self, key: str = "obs_window") -> torch.Tensor:
+        return self._obs_windows
 
     def fetch_frames(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
         """Return ``(frame_t, frame_next)`` uint8 arrays for visualization.
