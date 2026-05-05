@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as T
 
-GR1_REPO = Path("/home/ubuntu/GR1")
+GR1_REPO = Path("/home/ubuntu/GR-1")
 _gr1_str = str(GR1_REPO)
 
 import clip  # noqa: E402
