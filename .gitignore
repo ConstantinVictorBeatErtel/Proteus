@@ -29,3 +29,5 @@ grpo_*.pid
 
 # Model checkpoints (too large for git — download from releases or re-run training)
 models/*.pt
+data/libero_spatial
+__pycache__/

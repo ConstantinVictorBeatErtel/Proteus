@@ -28,32 +28,45 @@ _gr1_str = str(GR1_REPO)
 import clip  # noqa: E402
 
 # --- Load GR-1 models without polluting the 'models' namespace ---
-# 1. Save any existing 'models' entries (likely RAID's src/models.py)
+# Probleim: RAID/src/models.py shadows GR-1/models/ package on sys.path.
+# Fix: temporarily hide all sys.path entries that can reach a models.py.
+import os as _os
+
+# 1. Save any existing 'models' entries
 _saved_model_modules = {k: v for k, v in sys.modules.items()
                         if k == "models" or k.startswith("models.")}
-# 2. Remove them so GR-1 can claim the 'models' namespace
 for _k in _saved_model_modules:
     del sys.modules[_k]
-# 3. Add GR-1 to front of sys.path, remove src/ so GR-1's models/ wins
+
+# 2. Identify paths that let Python find a models.py before GR-1's package
+_paths_with_models_py = [
+    i for i, p in enumerate(sys.path)
+    if p and _os.path.isfile(_os.path.join(p, "models.py"))
+]
+_saved_paths = [sys.path[i] for i in _paths_with_models_py]
+for i in reversed(_paths_with_models_py):
+    sys.path.pop(i)
+
+# 3. Add GR-1 repo to front of sys.path
 _gr1_added = _gr1_str not in sys.path
 if _gr1_added:
     sys.path.insert(0, _gr1_str)
-# Temporarily move 'src' behind GR-1 if it's first
-_src_idx = next((i for i, p in enumerate(sys.path) if p.endswith("/src") or p == "src"), None)
 
 # 4. Import GR-1 modules
 import models.vision_transformer as vits   # GR-1's ViT
 from models.gr1 import GR1                 # GR-1 model class
 
-# 5. Save GR-1 model refs, clean up GR-1's 'models' namespace
+# 5. Clean up GR-1 modules; restore RAID's modules
 for _k in list(sys.modules.keys()):
     if _k == "models" or _k.startswith("models."):
         del sys.modules[_k]
-# 6. Restore RAID's saved modules
 sys.modules.update(_saved_model_modules)
-# 7. Remove GR-1 from sys.path
+
+# 6. Restore sys.path (remove GR-1 first, then re-insert hidden paths)
 if _gr1_added and _gr1_str in sys.path:
     sys.path.remove(_gr1_str)
+for p in reversed(_saved_paths):
+    sys.path.insert(0, p)
 
 # ---------------------------------------------------------------------------
 # Constants matching logs/configs.json
