@@ -81,33 +81,62 @@ class FeatureCachedDataset(Dataset):
         self._a_mean = torch.as_tensor(action_stats.mean, dtype=torch.float32)
         self._a_std = torch.as_tensor(action_stats.std, dtype=torch.float32).clamp(min=1e-6)
 
+        # Pre-stack everything into tensors so __getitem__ is just an index.
+        if transitions:
+            t_idx = torch.tensor([tr.feat_t_idx for tr in transitions], dtype=torch.long)
+            n_idx = torch.tensor([tr.feat_next_idx for tr in transitions], dtype=torch.long)
+            self._t_idx = t_idx
+            self._n_idx = n_idx
+            raw_actions = torch.from_numpy(np.stack([tr.action for tr in transitions], axis=0).astype(np.float32, copy=False))
+            self._raw_actions = raw_actions
+            if action_norm_mode == "zscore":
+                self._actions_norm = (raw_actions - self._a_mean) / self._a_std
+            else:
+                denom = (self._q99 - self._q01).clamp(min=1e-6)
+                self._actions_norm = (2.0 * (raw_actions - self._q01) / denom - 1.0).clamp(-1.0, 1.0)
+            self._contacts = torch.tensor([bool(tr.is_contact) for tr in transitions], dtype=torch.bool)
+            self._t_steps = torch.tensor([int(tr.t) for tr in transitions], dtype=torch.long)
+            self._demo_keys = [tr.demo_key for tr in transitions]
+        else:
+            self._t_idx = torch.zeros(0, dtype=torch.long)
+            self._n_idx = torch.zeros(0, dtype=torch.long)
+            self._raw_actions = torch.zeros(0, 7, dtype=torch.float32)
+            self._actions_norm = torch.zeros(0, 7, dtype=torch.float32)
+            self._contacts = torch.zeros(0, dtype=torch.bool)
+            self._t_steps = torch.zeros(0, dtype=torch.long)
+            self._demo_keys = []
+
     def __len__(self) -> int:
         return len(self.transitions)
 
-    def _norm_action(self, a: torch.Tensor) -> torch.Tensor:
-        if self.action_norm_mode == "zscore":
-            return (a - self._a_mean) / self._a_std
-        denom = (self._q99 - self._q01).clamp(min=1e-6)
-        return (2.0 * (a - self._q01) / denom - 1.0).clamp(-1.0, 1.0)
-
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        tr = self.transitions[idx]
-        f_t = self.features[tr.feat_t_idx]
-        f_n = self.features[tr.feat_next_idx]
-        a = torch.as_tensor(tr.action, dtype=torch.float32)
+        i = int(idx)
+        f_t = self.features[self._t_idx[i]]
+        f_n = self.features[self._n_idx[i]]
         return {
             "obs_t": f_t,
             "obs_next": f_n,
             "s_t": f_t,
             "s_next": f_n,
-            "action": self._norm_action(a),
-            "action_raw": a,
-            "is_contact": torch.tensor(bool(tr.is_contact), dtype=torch.bool),
-            "idx": torch.tensor(idx, dtype=torch.long),
-            "demo_key": tr.demo_key,
-            "t": torch.tensor(int(tr.t), dtype=torch.long),
+            "action": self._actions_norm[i],
+            "action_raw": self._raw_actions[i],
+            "is_contact": self._contacts[i],
+            "idx": torch.tensor(i, dtype=torch.long),
+            "demo_key": self._demo_keys[i],
+            "t": self._t_steps[i],
             "dataset_id": torch.tensor(0, dtype=torch.long),
         }
+
+    # ---- bulk accessors used by FeatureMemoryBank.populate_vectorized ----
+
+    def stacked_obs_t(self, key: str = "obs_t") -> torch.Tensor:
+        return self.features.index_select(0, self._t_idx)
+
+    def stacked_obs_next(self, key: str = "obs_next") -> torch.Tensor:
+        return self.features.index_select(0, self._n_idx)
+
+    def stacked_actions(self, key: str = "action") -> torch.Tensor:
+        return self._actions_norm
 
     def fetch_frames(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
         if self._frame_resolver is None:

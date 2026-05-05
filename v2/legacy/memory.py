@@ -116,6 +116,33 @@ class FeatureMemoryBank:
         self.keys[i] = self._key_fn(ot, on)
         self._ptr += 1
 
+    def populate_vectorized(
+        self,
+        obs_t: torch.Tensor,
+        obs_next: torch.Tensor,
+        actions: torch.Tensor,
+    ) -> None:
+        """Bulk-populate the bank from pre-stacked tensors.
+
+        ``obs_t`` and ``obs_next`` should be ``(N, obs_dim)``; ``actions``
+        is ``(N, action_dim)``. Single host->device copy plus a single
+        batched normalization for the keys, instead of N Python calls.
+        """
+        n = int(obs_t.shape[0])
+        if n > self.max_entries:
+            raise RuntimeError(
+                f"FeatureMemoryBank overflow: {n} entries > max_entries={self.max_entries}. "
+                "Reconstruct the bank with a larger ``max_entries``."
+            )
+        ot = obs_t.detach().to(self.device, dtype=torch.float32)
+        on = obs_next.detach().to(self.device, dtype=torch.float32)
+        aa = actions.detach().to(self.device, dtype=torch.float32)
+        self.obs_t[:n] = ot
+        self.obs_next[:n] = on
+        self.actions[:n] = aa
+        self.keys[:n] = self._key_fn_batch(ot, on)
+        self._ptr = n
+
     def populate_from_dataset(
         self,
         ds: Any,
@@ -124,7 +151,28 @@ class FeatureMemoryBank:
         obs_next_key: str = "s_next",
         action_key: str = "action",
     ) -> None:
+        """Populate from a Dataset.
+
+        Fast path: if ``ds`` exposes ``stacked_obs_t``, ``stacked_obs_next``,
+        and ``stacked_actions`` methods (returning pre-stacked tensors),
+        we populate in one vectorized batch — typically two orders of
+        magnitude faster than the per-row Python loop. The slow path is
+        kept for compatibility with adapters that don't pre-tensor.
+        """
         self.clear()
+        if (
+            hasattr(ds, "stacked_obs_t")
+            and hasattr(ds, "stacked_obs_next")
+            and hasattr(ds, "stacked_actions")
+        ):
+            self.populate_vectorized(
+                ds.stacked_obs_t(obs_t_key),
+                ds.stacked_obs_next(obs_next_key),
+                ds.stacked_actions(action_key),
+            )
+            print(f"[memory] FeatureMemoryBank populated (vectorized): ptr={self.ptr} / max={self.max_entries}")
+            return
+
         try:
             from tqdm import tqdm
 
@@ -136,7 +184,7 @@ class FeatureMemoryBank:
             ex = ds[i]
             self.add(ex[obs_t_key], ex[obs_next_key], ex[action_key])
 
-        print(f"[memory] FeatureMemoryBank populated: ptr={self.ptr} / max={self.max_entries}")
+        print(f"[memory] FeatureMemoryBank populated (slow path): ptr={self.ptr} / max={self.max_entries}")
 
     def retrieve(
         self,

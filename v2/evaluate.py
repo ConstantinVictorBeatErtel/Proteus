@@ -73,7 +73,8 @@ def evaluate_cell(run_id: str, n_panels: int = 12, render_panels: bool = True) -
     if cfg.head in {"raid", "knn"}:
         mem = FeatureMemoryBank(
             obs_dim=obs_dim, action_dim=action_dim,
-            max_entries=max(200_000, len(train_ds) + 1024), device=device,
+            max_entries=max(1024, len(train_ds) + 64),
+            device=device,
         )
         mem.populate_from_dataset(train_ds, desc="Eval bank", obs_t_key="obs_t", obs_next_key="obs_next")
 
@@ -83,17 +84,17 @@ def evaluate_cell(run_id: str, n_panels: int = 12, render_panels: bool = True) -
     model.eval()
 
     va_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
-    sse = 0.0
+    sse_t = torch.zeros((), device=device, dtype=torch.float64)
     n_elem = 0
-    contact_sse = 0.0
+    contact_sse_t = torch.zeros((), device=device, dtype=torch.float64)
     contact_n = 0
-    per_dof_sse = torch.zeros(action_dim, dtype=torch.float64)
+    per_dof_sse_t = torch.zeros(action_dim, device=device, dtype=torch.float64)
     per_dof_n = 0
 
-    panel_indices: list[int] = []
+    panel_indices: set[int] = set()
     if render_panels and len(val_ds) > 0:
         n_panels = min(n_panels, len(val_ds))
-        panel_indices = list(np.linspace(0, len(val_ds) - 1, n_panels, dtype=int).tolist())
+        panel_indices = set(int(i) for i in np.linspace(0, len(val_ds) - 1, n_panels, dtype=int).tolist())
     captured: dict[int, dict[str, Any]] = {}
 
     with torch.no_grad():
@@ -102,33 +103,43 @@ def evaluate_cell(run_id: str, n_panels: int = 12, render_panels: bool = True) -
             pred = _predict(cfg.head, model, batch, mem, device)
             y = batch["action"].to(device)
             err = pred - y
-            sse += float((err * err).sum().item())
+            err_sq = err * err
+            sse_t = sse_t + err_sq.sum().double()
             n_elem += int(err.numel())
             iso = batch["is_contact"].to(device)
             if iso.any():
-                e_c = err[iso]
-                contact_sse += float((e_c * e_c).sum().item())
-                contact_n += int(e_c.numel())
-            per_dof_sse += torch.sum(err * err, dim=0).detach().cpu().double()
+                e_c_sq = err_sq[iso]
+                contact_sse_t = contact_sse_t + e_c_sq.sum().double()
+                contact_n += int(e_c_sq.numel())
+            per_dof_sse_t = per_dof_sse_t + err_sq.sum(dim=0).double()
             per_dof_n += int(err.shape[0])
 
-            for i_in_batch in range(batch["action"].shape[0]):
-                global_idx = offset + i_in_batch
-                if global_idx in panel_indices:
+            B = int(batch["action"].shape[0])
+            wanted_local = [i for i in range(B) if (offset + i) in panel_indices]
+            if wanted_local:
+                pred_cpu = pred[wanted_local].detach().cpu().numpy()
+                gt_cpu = batch["action"][wanted_local].detach().cpu().numpy()
+                obs_t_cpu = batch["obs_t"][wanted_local].detach().cpu().numpy()
+                obs_n_cpu = batch["obs_next"][wanted_local].detach().cpu().numpy()
+                t_cpu = batch["t"][wanted_local].detach().cpu().numpy() if "t" in batch else None
+                contact_cpu = batch["is_contact"][wanted_local].detach().cpu().numpy()
+                demo_keys_batch = batch.get("demo_key")
+                for j, i_in_batch in enumerate(wanted_local):
+                    global_idx = offset + i_in_batch
                     captured[global_idx] = {
-                        "pred": pred[i_in_batch].cpu().numpy(),
-                        "gt": batch["action"][i_in_batch].cpu().numpy(),
-                        "obs_t": batch["obs_t"][i_in_batch].cpu().numpy(),
-                        "obs_next": batch["obs_next"][i_in_batch].cpu().numpy(),
-                        "demo_key": batch.get("demo_key", ["?"] * batch["action"].shape[0])[i_in_batch] if "demo_key" in batch else "?",
-                        "t": int(batch["t"][i_in_batch].item()) if "t" in batch else -1,
-                        "is_contact": bool(batch["is_contact"][i_in_batch].item()),
+                        "pred": pred_cpu[j],
+                        "gt": gt_cpu[j],
+                        "obs_t": obs_t_cpu[j],
+                        "obs_next": obs_n_cpu[j],
+                        "demo_key": (demo_keys_batch[i_in_batch] if isinstance(demo_keys_batch, list) else "?"),
+                        "t": int(t_cpu[j]) if t_cpu is not None else -1,
+                        "is_contact": bool(contact_cpu[j]),
                     }
-            offset += batch["action"].shape[0]
+            offset += B
 
-    val_mse = sse / max(1, n_elem)
-    contact_mse = contact_sse / max(1, contact_n) if contact_n > 0 else None
-    per_dof_mse = (per_dof_sse / max(1, per_dof_n)).tolist()
+    val_mse = float(sse_t.item()) / max(1, n_elem)
+    contact_mse = float(contact_sse_t.item()) / max(1, contact_n) if contact_n > 0 else None
+    per_dof_mse = (per_dof_sse_t.detach().cpu() / max(1, per_dof_n)).tolist()
 
     metrics = {
         "run_id": run_id,

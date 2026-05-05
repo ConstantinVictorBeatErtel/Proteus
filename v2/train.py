@@ -262,7 +262,8 @@ def train_cell(cfg: CellConfig, project: str = "raid_v2") -> dict[str, Any]:
     if cfg.head in {"raid", "knn"}:
         mem = FeatureMemoryBank(
             obs_dim=obs_dim, action_dim=action_dim,
-            max_entries=max(200_000, len(train_ds) + 1024), device=device,
+            max_entries=max(1024, len(train_ds) + 64),
+            device=device,
         )
         mem.populate_from_dataset(train_ds, desc="Fill bank", obs_t_key="obs_t", obs_next_key="obs_next")
 
@@ -288,27 +289,27 @@ def train_cell(cfg: CellConfig, project: str = "raid_v2") -> dict[str, Any]:
             tr_mse = float("nan")
             if not no_train:
                 model.train()
-                tr_sse = 0.0
+                tr_sse_t = torch.zeros((), device=device)
                 tr_n = 0
                 for batch in tr_loader:
                     loss, _pred = _train_step(cfg.head, model, batch, mem, device, train=True)
                     optim.zero_grad(set_to_none=True)
                     loss.backward()
                     optim.step()
-                    tr_sse += float(loss.detach().cpu().item()) * batch["action"].numel()
+                    tr_sse_t = tr_sse_t + loss.detach() * batch["action"].numel()
                     tr_n += int(batch["action"].numel())
-                tr_mse = tr_sse / max(1, tr_n)
+                tr_mse = float(tr_sse_t.item()) / max(1, tr_n)
 
             # val
             model.eval()
-            va_sse = 0.0
+            va_sse_t = torch.zeros((), device=device)
             va_n = 0
             with torch.no_grad():
                 for batch in va_loader:
                     loss, _pred = _train_step(cfg.head, model, batch, mem, device, train=False)
-                    va_sse += float(loss.detach().cpu().item()) * batch["action"].numel()
+                    va_sse_t = va_sse_t + loss.detach() * batch["action"].numel()
                     va_n += int(batch["action"].numel())
-            va_mse = va_sse / max(1, va_n)
+            va_mse = float(va_sse_t.item()) / max(1, va_n)
 
             history.append({"epoch": epoch, "train_mse": tr_mse, "val_mse": va_mse})
             run.log({"epoch": epoch, "train_mse": tr_mse, "val_mse": va_mse}, step=epoch)

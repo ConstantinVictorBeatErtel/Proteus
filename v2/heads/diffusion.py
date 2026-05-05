@@ -57,7 +57,7 @@ class DiffusionPolicyIDM(nn.Module):
         hidden_dim: int = 256,
         time_emb_dim: int = 128,
         n_train_timesteps: int = 100,
-        n_inference_steps: int = 16,
+        n_inference_steps: int = 4,
         clip_action_range: tuple[float, float] | None = None,
     ) -> None:
         super().__init__()

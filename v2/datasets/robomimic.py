@@ -130,11 +130,20 @@ def read_frames(
     timesteps: list[int] | np.ndarray,
     cam: str = IMAGE_OBS_KEY,
 ) -> np.ndarray:
-    """Return ``(len(timesteps), H, W, 3)`` uint8 frames for visualization."""
-    ts = list(int(t) for t in timesteps)
+    """Return ``(len(timesteps), H, W, 3)`` uint8 frames for visualization.
+
+    Uses HDF5 fancy-indexed slicing so we only pull the requested rows
+    off disk — important when a single demo can hold hundreds of MB of
+    pixels and we only want two of them for a panel.
+    """
+    ts = sorted({int(t) for t in timesteps})
     with h5py.File(hdf5_path, "r") as f:
-        arr = np.asarray(f["data"][demo_key]["obs"][cam])
-    return arr[ts]
+        dset = f["data"][demo_key]["obs"][cam]
+        arr = dset[ts, ...]
+    # Re-index back into the originally-requested order so ``frames[0]``
+    # is ``timesteps[0]`` even if the caller passed ``[t+1, t]``.
+    out_order = [ts.index(int(t)) for t in timesteps]
+    return arr[out_order]
 
 
 def build_transitions(demos: list[dict[str, np.ndarray]]) -> list[tuple[np.ndarray, ...]]:
@@ -195,13 +204,29 @@ class RoboMimicTransitionDataset(Dataset):
         self.stats = action_stats
         self.action_norm_mode = action_norm_mode
 
+        # Pre-stack the raw arrays once in __init__ so __getitem__ is a
+        # cheap tensor slice — saves ~75 % of dataloader overhead on the
+        # 50-epoch loops where __getitem__ is hit millions of times.
+        if transitions:
+            raw_s_t = np.stack([tr[0] for tr in transitions], axis=0).astype(np.float32, copy=False)
+            raw_s_n = np.stack([tr[1] for tr in transitions], axis=0).astype(np.float32, copy=False)
+            raw_a = np.stack([tr[2] for tr in transitions], axis=0).astype(np.float32, copy=False)
+            contacts = np.array([bool(tr[3]) for tr in transitions], dtype=np.bool_)
+            demo_keys = [str(tr[4]) for tr in transitions]
+            t_steps = np.array([int(tr[5]) for tr in transitions], dtype=np.int64)
+        else:
+            raw_s_t = np.zeros((0, state_dim), dtype=np.float32)
+            raw_s_n = np.zeros((0, state_dim), dtype=np.float32)
+            raw_a = np.zeros((0, 7), dtype=np.float32)
+            contacts = np.zeros((0,), dtype=np.bool_)
+            demo_keys = []
+            t_steps = np.zeros((0,), dtype=np.int64)
+
         if normalize_state:
             if state_mean is None or state_std is None:
-                states = np.stack(
-                    [tr[0] for tr in transitions] + [tr[1] for tr in transitions], axis=0
-                )
-                state_mean = states.mean(axis=0).astype(np.float32)
-                state_std = np.maximum(states.std(axis=0).astype(np.float32), 1e-6)
+                states_pool = np.concatenate([raw_s_t, raw_s_n], axis=0) if len(raw_s_t) > 0 else np.zeros((1, state_dim), dtype=np.float32)
+                state_mean = states_pool.mean(axis=0).astype(np.float32)
+                state_std = np.maximum(states_pool.std(axis=0).astype(np.float32), 1e-6)
             self.state_mean = torch.as_tensor(state_mean, dtype=torch.float32)
             self.state_std = torch.as_tensor(state_std, dtype=torch.float32)
         else:
@@ -213,37 +238,51 @@ class RoboMimicTransitionDataset(Dataset):
         self._a_mean = torch.as_tensor(action_stats.mean, dtype=torch.float32)
         self._a_std = torch.as_tensor(action_stats.std, dtype=torch.float32).clamp(min=1e-6)
 
+        # Materialize and cache the normalized obs / action tensors.
+        s_t_t = torch.from_numpy(raw_s_t)
+        s_n_t = torch.from_numpy(raw_s_n)
+        a_t = torch.from_numpy(raw_a)
+        self._raw_actions = a_t  # kept for visualization (un-normalized)
+        self._obs_t = (s_t_t - self.state_mean) / self.state_std
+        self._obs_next = (s_n_t - self.state_mean) / self.state_std
+        if action_norm_mode == "zscore":
+            self._actions_norm = (a_t - self._a_mean) / self._a_std
+        else:
+            denom = (self._q99 - self._q01).clamp(min=1e-6)
+            self._actions_norm = (2.0 * (a_t - self._q01) / denom - 1.0).clamp(-1.0, 1.0)
+        self._contacts = torch.from_numpy(contacts)
+        self._t_steps = torch.from_numpy(t_steps)
+        self._demo_keys = demo_keys
+
     def __len__(self) -> int:
         return len(self.transitions)
 
-    def _norm_state(self, s: torch.Tensor) -> torch.Tensor:
-        return (s - self.state_mean) / self.state_std
-
-    def _norm_action(self, a: torch.Tensor) -> torch.Tensor:
-        if self.action_norm_mode == "zscore":
-            return (a - self._a_mean) / self._a_std
-        denom = (self._q99 - self._q01).clamp(min=1e-6)
-        x = 2.0 * (a - self._q01) / denom - 1.0
-        return x.clamp(-1.0, 1.0)
-
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        s_t_np, s_n_np, a_np, contact, demo_key, t = self.transitions[idx]
-        s_t = torch.as_tensor(s_t_np, dtype=torch.float32)
-        s_n = torch.as_tensor(s_n_np, dtype=torch.float32)
-        a = torch.as_tensor(a_np, dtype=torch.float32)
+        i = int(idx)
         return {
-            "obs_t": self._norm_state(s_t),
-            "obs_next": self._norm_state(s_n),
-            "s_t": self._norm_state(s_t),
-            "s_next": self._norm_state(s_n),
-            "action": self._norm_action(a),
-            "action_raw": a,
-            "is_contact": torch.tensor(bool(contact), dtype=torch.bool),
-            "idx": torch.tensor(idx, dtype=torch.long),
-            "demo_key": demo_key,
-            "t": torch.tensor(int(t), dtype=torch.long),
+            "obs_t": self._obs_t[i],
+            "obs_next": self._obs_next[i],
+            "s_t": self._obs_t[i],
+            "s_next": self._obs_next[i],
+            "action": self._actions_norm[i],
+            "action_raw": self._raw_actions[i],
+            "is_contact": self._contacts[i],
+            "idx": torch.tensor(i, dtype=torch.long),
+            "demo_key": self._demo_keys[i],
+            "t": self._t_steps[i],
             "dataset_id": torch.tensor(0, dtype=torch.long),  # set by MixedIDMDataset
         }
+
+    # ---- bulk accessors used by FeatureMemoryBank.populate_vectorized ----
+
+    def stacked_obs_t(self, key: str = "obs_t") -> torch.Tensor:
+        return self._obs_t
+
+    def stacked_obs_next(self, key: str = "obs_next") -> torch.Tensor:
+        return self._obs_next
+
+    def stacked_actions(self, key: str = "action") -> torch.Tensor:
+        return self._actions_norm
 
     def fetch_frames(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
         """Return ``(frame_t, frame_next)`` uint8 arrays for visualization.

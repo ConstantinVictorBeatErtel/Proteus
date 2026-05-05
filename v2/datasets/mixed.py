@@ -57,3 +57,27 @@ class MixedIDMDataset(Dataset):
     @property
     def member_names(self) -> list[str]:
         return [m.name for m in self._members]
+
+    # ---- bulk accessors for FeatureMemoryBank.populate_vectorized ----
+
+    def _concat_member_stack(self, fn_name: str, key: str) -> torch.Tensor:
+        parts = []
+        for m in self._members:
+            getter = getattr(m.ds, fn_name, None)
+            if getter is None:
+                # Fallback: fetch each row via __getitem__ (slow, but
+                # only triggered if a member adapter doesn't pre-stack).
+                rows = [m.ds[i][key] for i in range(m.length)]  # type: ignore[index]
+                parts.append(torch.stack(rows, dim=0))
+            else:
+                parts.append(getter(key))
+        return torch.cat(parts, dim=0)
+
+    def stacked_obs_t(self, key: str = "obs_t") -> torch.Tensor:
+        return self._concat_member_stack("stacked_obs_t", key)
+
+    def stacked_obs_next(self, key: str = "obs_next") -> torch.Tensor:
+        return self._concat_member_stack("stacked_obs_next", key)
+
+    def stacked_actions(self, key: str = "action") -> torch.Tensor:
+        return self._concat_member_stack("stacked_actions", key)
