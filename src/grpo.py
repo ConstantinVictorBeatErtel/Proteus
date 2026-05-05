@@ -98,31 +98,42 @@ def grpo_train(
 
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
-            terms: list[torch.Tensor] = []
+            # Batch gradient computation: one forward pass per rollout (not per step).
+            total_loss_val = 0.0
+            n_terms = 0
+            optimizer.zero_grad(set_to_none=True)
             policy.train()
 
             for (traj, _, _), adv in zip(rollouts, advantages):
-                for s_t, s_next, retrieved, action_taken, _lp in traj:
-                    s_t_b = s_t.unsqueeze(0)
-                    s_next_b = s_next.unsqueeze(0)
-                    retr_b = retrieved.unsqueeze(0)
-                    kv_pad = torch.zeros(1, retr_b.shape[1], dtype=torch.bool, device=dev)
+                if not traj:
+                    continue
+                # Stack entire rollout into batches for a single forward pass.
+                # s_next_b uses the same s_t proxy as the rollout (on-policy consistency).
+                s_t_b    = torch.stack([t[0] for t in traj])          # (T, obs)
+                s_next_b = s_t_b                                       # proxy: same as rollout
+                retr_b   = torch.stack([t[2] for t in traj])          # (T, k, 7)
+                acts_b   = torch.stack([t[3] for t in traj])          # (T, 7)
+                T = s_t_b.shape[0]
+                kv_pad = torch.zeros(T, retr_b.shape[1], dtype=torch.bool, device=dev)
 
-                    pred, _ = policy(s_t_b, s_next_b, retr_b, kv_key_padding_mask=kv_pad)
-                    std = policy.get_std()
-                    dist = torch.distributions.Normal(pred.squeeze(0), std)
-                    log_prob = dist.log_prob(action_taken).sum()
+                pred, _ = policy(s_t_b, s_next_b, retr_b, kv_key_padding_mask=kv_pad)
+                std = policy.get_std()
+                dist = torch.distributions.Normal(pred, std)
+                log_probs = dist.log_prob(acts_b).sum(dim=-1)  # (T,)
 
-                    with torch.no_grad():
-                        ref_pred, _ = ref_policy(s_t_b, s_next_b, retr_b, kv_key_padding_mask=kv_pad)
-                        ref_dist = torch.distributions.Normal(ref_pred.squeeze(0), ref_policy.get_std())
-                        ref_lp = ref_dist.log_prob(action_taken).sum()
+                with torch.no_grad():
+                    ref_pred, _ = ref_policy(s_t_b, s_next_b, retr_b, kv_key_padding_mask=kv_pad)
+                    ref_dist = torch.distributions.Normal(ref_pred, ref_policy.get_std())
+                    ref_lps = ref_dist.log_prob(acts_b).sum(dim=-1)   # (T,)
 
-                    kl = log_prob - ref_lp
-                    loss = -adv * log_prob + beta * kl
-                    terms.append(loss)
+                kl = (log_probs - ref_lps).mean()
+                pg = -(adv * log_probs.mean())
+                rollout_loss = pg + beta * kl
+                rollout_loss.backward()
+                total_loss_val += rollout_loss.item()
+                n_terms += 1
 
-            if not terms:
+            if n_terms == 0:
                 log.append(
                     {
                         "update": int(update),
@@ -136,11 +147,9 @@ def grpo_train(
                 _persist_log()
                 continue
 
-            total_loss = torch.stack(terms).sum()
-            optimizer.zero_grad(set_to_none=True)
-            total_loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), clip_grad)
             optimizer.step()
+            total_loss_val /= max(n_terms, 1)
 
             sr = float(sum(successes)) / float(G)
             entry = {
@@ -148,7 +157,7 @@ def grpo_train(
                 "success_rate": sr,
                 "mean_reward": float(rewards.mean().item()),
                 "reward_std": float(rewards.std().item()),
-                "loss_sum": float(total_loss.item()),
+                "loss_mean": total_loss_val,
             }
             log.append(entry)
             _persist_log()
@@ -156,7 +165,7 @@ def grpo_train(
             if update % log_every == 0:
                 print(
                     f"update {update:4d} | SR: {sr:.2f} | mean_r: {rewards.mean():.2f} | "
-                    f"loss: {total_loss.item():.4f}",
+                    f"loss: {total_loss_val:.4f}",
                     flush=True,
                 )
 

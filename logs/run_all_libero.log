@@ -1,0 +1,202 @@
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training direct_visual | n_demos=25 ===
+  train=1261 val=1201 feat_dim=384
+  epoch   1/100 | train=1.2024 val=1.0125 best=1.0125@1 (0.8s)
+  epoch  10/100 | train=1.0712 val=0.9650 best=0.9650@10 (0.4s)
+  epoch  20/100 | train=0.9943 val=0.9095 best=0.8946@19 (0.4s)
+  epoch  30/100 | train=0.9084 val=0.8809 best=0.8722@27 (0.4s)
+  epoch  40/100 | train=0.8333 val=0.8746 best=0.8556@39 (0.4s)
+  epoch  50/100 | train=0.7601 val=0.9017 best=0.8556@39 (0.4s)
+  epoch  60/100 | train=0.6828 val=0.8507 best=0.8507@60 (0.4s)
+  epoch  70/100 | train=0.6328 val=0.8420 best=0.8420@70 (0.4s)
+  epoch  80/100 | train=0.5709 val=0.8712 best=0.8420@70 (0.4s)
+  epoch  90/100 | train=0.5328 val=0.8775 best=0.8420@70 (0.4s)
+  epoch 100/100 | train=0.5247 val=0.8774 best=0.8420@70 (0.4s)
+
+Best val MSE: 0.8420 @ epoch 70
+Checkpoint: models/direct_visual_25demos_libero_best.pt
+
+>>> /usr/bin/python3 src/train_libero.py --condition direct_visual --n_demos 25 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training direct_visual | n_demos=50 ===
+  train=5016 val=1255 feat_dim=384
+  epoch   1/100 | train=1.0614 val=0.9176 best=0.9176@1 (0.8s)
+  epoch  10/100 | train=0.8680 val=0.7960 best=0.7651@9 (0.4s)
+  epoch  20/100 | train=0.7803 val=0.7433 best=0.7240@18 (0.4s)
+  epoch  30/100 | train=0.7389 val=0.7084 best=0.7006@27 (0.4s)
+  epoch  40/100 | train=0.6757 val=0.6762 best=0.6762@40 (0.4s)
+  epoch  50/100 | train=0.6223 val=0.7078 best=0.6743@49 (0.4s)
+  epoch  60/100 | train=0.5773 val=0.6606 best=0.6585@59 (0.4s)
+  epoch  70/100 | train=0.5283 val=0.6478 best=0.6411@68 (0.4s)
+  epoch  80/100 | train=0.4866 val=0.6540 best=0.6411@68 (0.4s)
+  epoch  90/100 | train=0.4607 val=0.6648 best=0.6372@81 (0.4s)
+  epoch 100/100 | train=0.4583 val=0.6541 best=0.6372@81 (0.4s)
+
+Best val MSE: 0.6372 @ epoch 81
+Checkpoint: models/direct_visual_50demos_libero_best.pt
+
+  direct_visual @ 25 demos → val_mse=0.8420
+
+>>> /usr/bin/python3 src/train_libero.py --condition direct_visual --n_demos 50 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training direct_visual | n_demos=100 ===
+  train=9979 val=2488 feat_dim=384
+  epoch   1/100 | train=1.0219 val=0.9449 best=0.9449@1 (1.0s)
+  epoch  10/100 | train=0.8004 val=0.8350 best=0.7826@9 (0.5s)
+  epoch  20/100 | train=0.7207 val=0.7171 best=0.7171@20 (0.5s)
+  epoch  30/100 | train=0.6659 val=0.6698 best=0.6552@29 (0.4s)
+  epoch  40/100 | train=0.6140 val=0.6378 best=0.6378@40 (0.5s)
+  epoch  50/100 | train=0.5660 val=0.6110 best=0.6092@47 (0.5s)
+  epoch  60/100 | train=0.5170 val=0.6091 best=0.5967@59 (0.5s)
+  epoch  70/100 | train=0.4891 val=0.5819 best=0.5819@70 (0.5s)
+  epoch  80/100 | train=0.4544 val=0.5755 best=0.5755@80 (0.5s)
+  epoch  90/100 | train=0.4349 val=0.5721 best=0.5700@83 (0.5s)
+  epoch 100/100 | train=0.4277 val=0.5725 best=0.5700@83 (0.5s)
+
+Best val MSE: 0.5700 @ epoch 83
+Checkpoint: models/direct_visual_100demos_libero_best.pt
+
+  direct_visual @ 50 demos → val_mse=0.6372
+
+>>> /usr/bin/python3 src/train_libero.py --condition direct_visual --n_demos 100 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training direct_visual | n_demos=200 ===
+  train=19809 val=4924 feat_dim=384
+  epoch   1/100 | train=0.9936 val=0.9473 best=0.9473@1 (1.1s)
+  epoch  10/100 | train=0.7429 val=0.7424 best=0.7424@10 (0.7s)
+  epoch  20/100 | train=0.6615 val=0.6746 best=0.6746@20 (0.7s)
+  epoch  30/100 | train=0.6006 val=0.6511 best=0.6511@30 (0.7s)
+  epoch  40/100 | train=0.5544 val=0.6262 best=0.6109@37 (0.7s)
+  epoch  50/100 | train=0.5095 val=0.5914 best=0.5914@50 (0.7s)
+  epoch  60/100 | train=0.4813 val=0.5790 best=0.5691@59 (0.7s)
+  epoch  70/100 | train=0.4509 val=0.5749 best=0.5581@69 (0.7s)
+  epoch  80/100 | train=0.4234 val=0.5676 best=0.5546@78 (0.7s)
+  epoch  90/100 | train=0.4077 val=0.5625 best=0.5523@89 (0.7s)
+  epoch 100/100 | train=0.4007 val=0.5563 best=0.5523@89 (0.8s)
+
+Best val MSE: 0.5523 @ epoch 89
+Checkpoint: models/direct_visual_200demos_libero_best.pt
+
+  direct_visual @ 100 demos → val_mse=0.5700
+
+>>> /usr/bin/python3 src/train_libero.py --condition direct_visual --n_demos 200 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training raid_visual | n_demos=25 ===
+  train=1261 val=1201 feat_dim=384
+  Memory bank: 2462 entries
+  epoch   1/100 | train=0.6063 val=0.1814 best=0.1814@1 (1.0s)
+  epoch  10/100 | train=0.4506 val=0.1813 best=0.1320@3 (0.4s)
+  epoch  20/100 | train=0.4378 val=0.1746 best=0.1320@3 (0.4s)
+  epoch  30/100 | train=0.4528 val=0.1783 best=0.1320@3 (0.4s)
+  epoch  40/100 | train=0.4308 val=0.1866 best=0.1320@3 (0.4s)
+  epoch  50/100 | train=0.4039 val=0.1896 best=0.1320@3 (0.4s)
+  epoch  60/100 | train=0.3905 val=0.2016 best=0.1320@3 (0.4s)
+  epoch  70/100 | train=0.3808 val=0.2139 best=0.1320@3 (0.4s)
+  epoch  80/100 | train=0.3670 val=0.2275 best=0.1320@3 (0.3s)
+  epoch  90/100 | train=0.3833 val=0.2328 best=0.1320@3 (0.4s)
+  epoch 100/100 | train=0.3542 val=0.2348 best=0.1320@3 (0.4s)
+
+Best val MSE: 0.1320 @ epoch 3
+Checkpoint: models/raid_visual_25demos_libero_best.pt
+
+  direct_visual @ 200 demos → val_mse=0.5523
+
+>>> /usr/bin/python3 src/train_libero.py --condition raid_visual --n_demos 25 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training raid_visual | n_demos=50 ===
+  train=5016 val=1255 feat_dim=384
+  Memory bank: 6271 entries
+  epoch   1/100 | train=0.4561 val=0.1607 best=0.1607@1 (1.1s)
+  epoch  10/100 | train=0.4042 val=0.1707 best=0.1543@8 (0.5s)
+  epoch  20/100 | train=0.3950 val=0.1636 best=0.1543@8 (0.5s)
+  epoch  30/100 | train=0.3771 val=0.1830 best=0.1543@8 (0.5s)
+  epoch  40/100 | train=0.3651 val=0.1929 best=0.1543@8 (0.5s)
+  epoch  50/100 | train=0.3530 val=0.1910 best=0.1543@8 (0.5s)
+  epoch  60/100 | train=0.3362 val=0.1929 best=0.1543@8 (0.5s)
+  epoch  70/100 | train=0.3340 val=0.1963 best=0.1543@8 (0.5s)
+  epoch  80/100 | train=0.3198 val=0.1968 best=0.1543@8 (0.5s)
+  epoch  90/100 | train=0.3186 val=0.2055 best=0.1543@8 (0.5s)
+  epoch 100/100 | train=0.3094 val=0.2060 best=0.1543@8 (0.5s)
+
+Best val MSE: 0.1543 @ epoch 8
+Checkpoint: models/raid_visual_50demos_libero_best.pt
+
+  raid_visual @ 25 demos → val_mse=0.1320
+
+>>> /usr/bin/python3 src/train_libero.py --condition raid_visual --n_demos 50 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training raid_visual | n_demos=100 ===
+  train=9979 val=2488 feat_dim=384
+  Memory bank: 12467 entries
+  epoch   1/100 | train=0.4377 val=0.1883 best=0.1883@1 (1.3s)
+  epoch  10/100 | train=0.3876 val=0.1868 best=0.1818@3 (0.7s)
+  epoch  20/100 | train=0.3661 val=0.1879 best=0.1733@18 (0.6s)
+  epoch  30/100 | train=0.3532 val=0.1912 best=0.1687@21 (0.7s)
+  epoch  40/100 | train=0.3380 val=0.1940 best=0.1687@21 (0.7s)
+  epoch  50/100 | train=0.3267 val=0.1795 best=0.1687@21 (0.7s)
+  epoch  60/100 | train=0.3138 val=0.1899 best=0.1687@21 (0.7s)
+  epoch  70/100 | train=0.3070 val=0.1984 best=0.1687@21 (0.7s)
+  epoch  80/100 | train=0.2960 val=0.2063 best=0.1687@21 (0.7s)
+  epoch  90/100 | train=0.2888 val=0.2007 best=0.1687@21 (0.7s)
+  epoch 100/100 | train=0.2878 val=0.2026 best=0.1687@21 (0.7s)
+
+Best val MSE: 0.1687 @ epoch 21
+Checkpoint: models/raid_visual_100demos_libero_best.pt
+
+  raid_visual @ 50 demos → val_mse=0.1543
+
+>>> /usr/bin/python3 src/train_libero.py --condition raid_visual --n_demos 100 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+
+=== Training raid_visual | n_demos=200 ===
+  train=19809 val=4924 feat_dim=384
+  Memory bank: 24733 entries
+  epoch   1/100 | train=0.4576 val=0.1933 best=0.1933@1 (1.5s)
+  epoch  10/100 | train=0.3774 val=0.1927 best=0.1776@9 (0.9s)
+  epoch  20/100 | train=0.3488 val=0.2042 best=0.1776@9 (1.1s)
+  epoch  30/100 | train=0.3279 val=0.1885 best=0.1714@26 (1.1s)
+  epoch  40/100 | train=0.3187 val=0.1848 best=0.1714@26 (1.0s)
+  epoch  50/100 | train=0.3024 val=0.1963 best=0.1714@26 (1.0s)
+  epoch  60/100 | train=0.2960 val=0.1839 best=0.1714@26 (1.0s)
+  epoch  70/100 | train=0.2865 val=0.1880 best=0.1714@26 (1.0s)
+  epoch  80/100 | train=0.2805 val=0.2047 best=0.1714@26 (1.0s)
+  epoch  90/100 | train=0.2729 val=0.1984 best=0.1714@26 (1.0s)
+  epoch 100/100 | train=0.2749 val=0.2004 best=0.1714@26 (1.0s)
+
+Best val MSE: 0.1714 @ epoch 26
+Checkpoint: models/raid_visual_200demos_libero_best.pt
+
+  raid_visual @ 100 demos → val_mse=0.1687
+
+>>> /usr/bin/python3 src/train_libero.py --condition raid_visual --n_demos 200 --feature_dir data/libero_spatial/features --epochs 100 --device cuda
+
+  raid_visual @ 200 demos → val_mse=0.1714
+
+
+=== LIBERO-Spatial Offline Results ===
+Condition                   25d      50d     100d     200d
+----------------------------------------------------------
+direct_visual            0.8420   0.6372   0.5700   0.5523
+raid_visual              0.1320   0.1543   0.1687   0.1714
+
+Results saved to configs/results_libero.json
+
+=== Stage 1 Validation Gate ===
+direct_visual @ 25 demos: 0.8420
+raid_visual   @ 25 demos: 0.1320
+✓ PASSED — raid_visual ≤ direct_visual. Proceed to Stage 2 (GRPO).

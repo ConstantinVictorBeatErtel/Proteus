@@ -128,11 +128,12 @@ def run_episode(
                 action_norm = pred.squeeze(0)
                 log_prob = torch.zeros(1, device=dev, dtype=torch.float32)
         else:
-            pred, _ = policy(s_t_batch, s_next_proxy, retrieved_batch)
-            std = policy.get_std()
-            dist = torch.distributions.Normal(pred.squeeze(0), std)
-            action_norm = dist.sample()
-            log_prob = dist.log_prob(action_norm).sum()
+            with torch.no_grad():
+                pred, _ = policy(s_t_batch, s_next_proxy, retrieved_batch)
+                std = policy.get_std()
+                dist = torch.distributions.Normal(pred.squeeze(0), std)
+                action_norm = dist.sample()
+                log_prob = dist.log_prob(action_norm).sum()
 
         action = denormalize_action(action_norm, norm_stats, device=dev)
         action_np = action.detach().cpu().numpy().reshape(-1).clip(-1.0, 1.0)

@@ -17,3 +17,15 @@ venv/
 # Heavy / re-downloadable datasets (RoboMimic HDF5)
 *.hdf5
 data/**/*.hdf5
+
+# Large binary data (re-generable: run cache_gr1_features.py)
+data/libero_spatial/
+checkpoints/
+
+# Temp log files
+grpo_*.log
+grpo_*.out
+grpo_*.pid
+
+# Model checkpoints (too large for git — download from releases or re-run training)
+models/*.pt

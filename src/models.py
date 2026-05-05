@@ -167,6 +167,136 @@ class RAIDDecoderCrossAttn(nn.Module):
         return self.log_std.exp().clamp(1e-4, 1.0)
 
 
+# ---------------------------------------------------------------------------
+# Visual RAID models — use GR-1 384-dim features as state representation
+# ---------------------------------------------------------------------------
+
+class DirectMLPVisual(nn.Module):
+    """DirectMLP baseline using GR-1 384-dim visual features."""
+
+    def __init__(self, feat_dim: int = 384, action_dim: int = 7,
+                 hidden_dim: int = 512, dropout: float = 0.1):
+        super().__init__()
+        self.feat_dim   = feat_dim
+        self.action_dim = action_dim
+        self.net = nn.Sequential(
+            nn.Linear(feat_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, action_dim),
+        )
+
+    def forward(self, feat_t: torch.Tensor, feat_next: torch.Tensor) -> torch.Tensor:
+        return self.net(torch.cat([feat_t, feat_next], dim=-1))
+
+
+class RAIDDecoderVisual(nn.Module):
+    """
+    Retrieval-Augmented Inverse Dynamics decoder on GR-1 visual features.
+
+    Architecture mirrors RAIDDecoderCrossAttn but operates in the 384-dim
+    GR-1 latent space instead of low-dimensional proprioception.
+
+    s_t and s_next are GR-1 features (384-dim each).
+    retrieved_actions are k normalised actions (7-dim each).
+    """
+
+    def __init__(
+        self,
+        feat_dim: int = 384,
+        action_dim: int = 7,
+        k: int = 3,
+        d_attn: int = 64,
+        hidden_dim: int = 512,
+        dropout: float = 0.1,
+        prior_dropout: float = 0.4,
+        prior_noise_std: float = 0.05,
+    ):
+        super().__init__()
+        self.feat_dim   = feat_dim
+        self.action_dim = action_dim
+
+        in_dim = feat_dim * 2   # cat(feat_t, feat_next)
+
+        # Cross-attention: query from state features, keys from retrieved actions
+        self.q_proj   = nn.Linear(in_dim, d_attn)
+        self.k_proj   = nn.Linear(action_dim, d_attn)
+        self._sqrt_d  = d_attn ** 0.5
+
+        # Gated blend between direct branch and attention-weighted prior
+        self.gate_lin = nn.Linear(in_dim, action_dim)
+
+        # Direct inverse-dynamics branch
+        self.direct = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, action_dim),
+        )
+
+        self.prior_drop       = nn.Dropout(prior_dropout)
+        self._prior_noise_std = prior_noise_std
+
+        # For GRPO stage
+        self.log_std = nn.Parameter(torch.full((action_dim,), -1.0))
+
+    def forward(
+        self,
+        feat_t: torch.Tensor,
+        feat_next: torch.Tensor,
+        retrieved_actions: torch.Tensor,
+        kv_key_padding_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            feat_t:           (B, feat_dim)
+            feat_next:        (B, feat_dim)
+            retrieved_actions:(B, k, action_dim)
+            kv_key_padding_mask: (B, k) bool, True=ignore
+
+        Returns:
+            action_pred:  (B, action_dim)
+            attn_weights: (B, 1, k)
+        """
+        x = torch.cat([feat_t, feat_next], dim=-1)   # (B, feat_dim*2)
+
+        # Attention over retrieved actions
+        q = self.q_proj(x).unsqueeze(1)              # (B, 1, d_attn)
+        k = self.k_proj(retrieved_actions)            # (B, k, d_attn)
+        scores = (q @ k.transpose(-2, -1)) / self._sqrt_d   # (B, 1, k)
+        if kv_key_padding_mask is not None:
+            scores = scores.masked_fill(kv_key_padding_mask.unsqueeze(1), float("-inf"))
+        attn_weights = torch.softmax(scores, dim=-1)  # (B, 1, k)
+        a_prior = (attn_weights @ retrieved_actions).squeeze(1)   # (B, action_dim)
+
+        # Gate
+        g = torch.sigmoid(self.gate_lin(x))
+        d = self.direct(x)
+
+        # Prior regularisation
+        if self.training:
+            ap = self.prior_drop(a_prior)
+            ap = ap + torch.randn_like(ap) * self._prior_noise_std
+        else:
+            ap = a_prior
+
+        out = g * d + (1.0 - g) * ap
+        return out, attn_weights
+
+    def get_std(self) -> torch.Tensor:
+        return self.log_std.exp().clamp(1e-4, 1.0)
+
+
 if __name__ == "__main__":
     B, D, A = 4, 19, 7
     dm = DirectMLP(D, A)
