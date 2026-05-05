@@ -211,6 +211,12 @@ class RoboMimicTransitionDataset(Dataset):
             raw_s_t = np.stack([tr[0] for tr in transitions], axis=0).astype(np.float32, copy=False)
             raw_s_n = np.stack([tr[1] for tr in transitions], axis=0).astype(np.float32, copy=False)
             raw_a = np.stack([tr[2] for tr in transitions], axis=0).astype(np.float32, copy=False)
+            if raw_a.shape[1] != 7:
+                raise RuntimeError(
+                    f"{self.spec.name} exposes action_dim={raw_a.shape[1]}, but the v2 low-dim "
+                    "IDM heads assume the 7-D OSC_POSE action layout. Exclude this task from "
+                    "mixed low-dim cells or use an action-space-specific adapter."
+                )
             contacts = np.array([bool(tr[3]) for tr in transitions], dtype=np.bool_)
             demo_keys = [str(tr[4]) for tr in transitions]
             t_steps = np.array([int(tr[5]) for tr in transitions], dtype=np.int64)

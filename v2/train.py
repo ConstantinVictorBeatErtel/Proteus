@@ -78,7 +78,6 @@ _MIXED_LOWDIM_FULL = (
     ("lift", "ph"), ("lift", "mh"),
     ("can", "ph"), ("can", "mh"),
     ("square", "ph"), ("square", "mh"),
-    ("transport", "ph"), ("transport", "mh"),
 )
 
 
@@ -107,10 +106,12 @@ def build_dataset(
     * ``robomimic_<task>_<variant>_low_dim`` — single-task RoboMimic,
       proprioceptive state.
     * ``mixed_robomimic_lowdim_full`` / ``mixed_robomimic_lowdim_subset25``
-      — concatenation across all four single-arm RoboMimic tasks
+      — concatenation across the 7-D-action RoboMimic tasks
       (PH+MH); narrower state vectors are right-padded to the widest
-      task so cross-task low-dim cells run cleanly. The ``subset25``
-      variant trims each child to 25% of the requested demo count.
+      task so cross-task low-dim cells run cleanly. ``transport`` is
+      excluded here because its low-dim action width is not 7-D. The
+      ``subset25`` variant trims each child to 25% of the requested
+      demo count.
     * ``robomimic_<task>_<variant>_image`` — RoboMimic image-feature
       cells; expects cached CLS features at
       ``<artifact_root>/features/<dataset>_<encoder>_cls.safetensors``.
