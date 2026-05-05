@@ -155,6 +155,29 @@ class RAIDMemoryBank:
 
         return pad_a.to(out_dev), pad_m.to(out_dev)
 
+    def retrieve_single(self, s_t: torch.Tensor, k: int = 3) -> torch.Tensor:
+        """Retrieval keyed on ``s_t`` alone (no transition pair) for rollout / inference."""
+        n = self.ptr
+        kk_req = max(1, int(k))
+        out_dev = s_t.device
+        if n == 0:
+            return torch.zeros(kk_req, self.action_dim, device=out_dev, dtype=torch.float32)
+
+        dv = self.device
+        st = s_t.detach().reshape(-1).to(dv, dtype=torch.float32)
+        q = F.normalize(st.unsqueeze(0), dim=-1, eps=1e-8)
+        s_t_keys = F.normalize(self.s_t[:n], dim=-1, eps=1e-8)
+        sims = (q @ s_t_keys.T).squeeze(0)
+
+        kk_eff = min(kk_req, n)
+        topi = sims.topk(kk_eff, largest=True).indices
+        gathered = self.actions[topi].to(out_dev, dtype=torch.float32)
+
+        if kk_eff < kk_req:
+            pad = torch.zeros(kk_req - kk_eff, self.action_dim, device=out_dev, dtype=torch.float32)
+            gathered = torch.cat([gathered, pad], dim=0)
+        return gathered
+
     def hit_rate(self, ds: Any, k: int = 3, tau_min: float | None = None) -> float:
         """Share of samples with at least one valid retrieved neighbour."""
 

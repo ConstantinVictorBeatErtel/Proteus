@@ -8,7 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCALES = (25, 50, 100, 200)
-CONDITIONS = ("direct_mlp", "raid")
+CONDITIONS = ("direct_mlp", "raid", "raid_crossattn")
 
 
 def main() -> None:

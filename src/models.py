@@ -67,6 +67,85 @@ class RAIDDecoder(nn.Module):
         return g * d + (1.0 - g) * ap
 
 
+class RAIDDecoderCrossAttn(nn.Module):
+    """Cross-attention over retrieved actions: query from (s_t, s_next); keys/values from actions."""
+
+    def __init__(
+        self,
+        obs_dim: int,
+        action_dim: int = 7,
+        k: int = 3,
+        d_model: int = 128,
+        nhead: int = 4,
+    ):
+        super().__init__()
+        self.obs_dim = int(obs_dim)
+        self.action_dim = int(action_dim)
+        self.k = int(k)
+        self.d_model = int(d_model)
+
+        sx = self.obs_dim * 2
+        self.query_proj = nn.Linear(sx, d_model)
+        self.kv_proj = nn.Linear(action_dim, d_model)
+        self.attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            batch_first=True,
+            dropout=0.1,
+        )
+        self.head = nn.Sequential(
+            nn.Linear(d_model * 2, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Linear(256, action_dim),
+        )
+        self.log_std = nn.Parameter(torch.full((action_dim,), -1.0))
+
+    def forward(
+        self,
+        s_t: torch.Tensor,
+        s_next: torch.Tensor,
+        retrieved_actions: torch.Tensor,
+        kv_key_padding_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            s_t, s_next: (B, obs_dim)
+            retrieved_actions: (B, k, action_dim)
+            kv_key_padding_mask: optional (B, k), True = ignore this key position (padding).
+        Returns:
+            out: (B, action_dim)
+            attn_weights: (B, 1, k) when average_attn_weights=True (PyTorch default).
+        """
+        query = self.query_proj(torch.cat([s_t, s_next], dim=-1)).unsqueeze(1)  # (B, 1, d_model)
+        kv = self.kv_proj(retrieved_actions)  # (B, k, d_model)
+
+        attn_out, attn_weights = self.attn(
+            query,
+            kv,
+            kv,
+            key_padding_mask=kv_key_padding_mask,
+            need_weights=True,
+            average_attn_weights=True,
+        )
+        attn_out = attn_out.squeeze(1)  # (B, d_model)
+        query_flat = query.squeeze(1)  # (B, d_model)
+        out = self.head(torch.cat([query_flat, attn_out], dim=-1))
+
+        # Ensure attn_weights is (B, 1, k) for visualization
+        if attn_weights.ndim == 2:
+            attn_weights = attn_weights.unsqueeze(1)
+
+        return out, attn_weights
+
+    def get_std(self) -> torch.Tensor:
+        return self.log_std.exp().clamp(1e-4, 1.0)
+
+
 if __name__ == "__main__":
     B, D, A = 4, 19, 7
     dm = DirectMLP(D, A)

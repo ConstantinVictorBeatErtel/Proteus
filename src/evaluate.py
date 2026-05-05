@@ -19,7 +19,7 @@ if str(SRC_DIR) not in sys.path:
 
 from data import make_train_val
 from memory import RAIDMemoryBank
-from models import DirectMLP, RAIDDecoder
+from models import DirectMLP, RAIDDecoder, RAIDDecoderCrossAttn
 
 SEED = 42
 SCALES = [25, 50, 100, 200]
@@ -61,20 +61,32 @@ def eval_scale(n_demos: int, device: torch.device, tau_min: float | None) -> dic
 
     dpath = PROJECT_ROOT / "models" / f"direct_mlp_{n_demos}demos_best.pt"
     rpath = PROJECT_ROOT / "models" / f"raid_{n_demos}demos_best.pt"
+    capp = PROJECT_ROOT / "models" / f"raid_crossattn_{n_demos}demos_best.pt"
     if not dpath.is_file():
         raise FileNotFoundError(str(dpath))
     if not rpath.is_file():
         raise FileNotFoundError(str(rpath))
+    if not capp.is_file():
+        raise FileNotFoundError(str(capp))
 
     dm = DirectMLP(train_ds.state_dim, train_ds.action_dim, hidden_dim=256, dropout=0.1).to(device)
     rd = RAIDDecoder(train_ds.state_dim, train_ds.action_dim, hidden_dim=256, dropout=0.1).to(device)
+    ca = RAIDDecoderCrossAttn(
+        obs_dim=train_ds.state_dim,
+        action_dim=train_ds.action_dim,
+        k=K_RETR,
+        d_model=128,
+        nhead=4,
+    ).to(device)
     dm.load_state_dict(torch.load(dpath, map_location=device, weights_only=False)["model_state_dict"])
     rd.load_state_dict(torch.load(rpath, map_location=device, weights_only=False)["model_state_dict"])
+    ca.load_state_dict(torch.load(capp, map_location=device, weights_only=False)["model_state_dict"])
     dm.eval()
     rd.eval()
+    ca.eval()
 
     A = train_ds.action_dim
-    names = ("mean_baseline", "nearest_neighbor", "direct_mlp", "raid")
+    names = ("mean_baseline", "nearest_neighbor", "direct_mlp", "raid", "raid_crossattn")
     acc: dict[str, dict[str, float | int | torch.Tensor]] = {}
     for nm in names:
         acc[nm] = {
@@ -102,11 +114,16 @@ def eval_scale(n_demos: int, device: torch.device, tau_min: float | None) -> dic
         qhits += int(mk.any(dim=1).sum().item())
         qtot += int(mk.shape[0])
 
+        kv_pad = ~mk.to(device)
+
+        pred_ca, _ = ca(st, sn, retr.to(device), kv_key_padding_mask=kv_pad)
+
         preds = {
             "mean_baseline": torch.zeros_like(y),
             "nearest_neighbor": prior,
             "direct_mlp": dm(st, sn),
             "raid": rd(st, sn, prior),
+            "raid_crossattn": pred_ca,
         }
 
         for nm, pr in preds.items():
@@ -136,7 +153,11 @@ def eval_scale(n_demos: int, device: torch.device, tau_min: float | None) -> dic
             "contact_mse": ratio_mse(float(a["sc"]), int(a["nc"])),
             "noncontact_mse": ratio_mse(float(a["sn"]), int(a["nn"])),
             "per_dof_mse": dof,
-            "hit_rate": (hr if nm in ("nearest_neighbor", "raid") else None),
+            "hit_rate": (
+                hr
+                if nm in ("nearest_neighbor", "raid", "raid_crossattn")
+                else None
+            ),
         }
     return out
 
@@ -150,10 +171,13 @@ def fmt(x: float | None) -> str:
 
 
 def print_table(all_rows: dict[str, dict[str, Any]]) -> None:
-    print("\n" + "=" * 110)
-    hdr = f"{'n':>4} | {'mean':>10} | {'kNN':>10} | {'mlp':>10} | {'raid':>10} | {'c_mb':>10} | {'c_knn':>10} | {'c_mlp':>10} | {'c_rd':>10} | {'hit':>6}"
+    print("\n" + "=" * 128)
+    hdr = (
+        f"{'n':>4} | {'mean':>10} | {'kNN':>10} | {'mlp':>10} | {'raid':>10} | {'xattn':>10} | "
+        f"{'c_mb':>10} | {'c_knn':>10} | {'c_mlp':>10} | {'c_rd':>10} | {'c_xa':>10} | {'hit':>6}"
+    )
     print(hdr)
-    print("-" * 110)
+    print("-" * 128)
     for nd in SCALES:
         sk = str(nd)
         hr = float(all_rows["nearest_neighbor"][sk]["hit_rate"] or 0.0)
@@ -162,12 +186,14 @@ def print_table(all_rows: dict[str, dict[str, Any]]) -> None:
             f"{fmt(all_rows['nearest_neighbor'][sk]['mse']):>10} | "
             f"{fmt(all_rows['direct_mlp'][sk]['mse']):>10} | "
             f"{fmt(all_rows['raid'][sk]['mse']):>10} | "
+            f"{fmt(all_rows['raid_crossattn'][sk]['mse']):>10} | "
             f"{fmt(all_rows['mean_baseline'][sk]['contact_mse']):>10} | "
             f"{fmt(all_rows['nearest_neighbor'][sk]['contact_mse']):>10} | "
             f"{fmt(all_rows['direct_mlp'][sk]['contact_mse']):>10} | "
-            f"{fmt(all_rows['raid'][sk]['contact_mse']):>10} | {hr:>6.3f}"
+            f"{fmt(all_rows['raid'][sk]['contact_mse']):>10} | "
+            f"{fmt(all_rows['raid_crossattn'][sk]['contact_mse']):>10} | {hr:>6.3f}"
         )
-    print("=" * 110 + "\n")
+    print("=" * 128 + "\n")
 
 
 def main() -> None:
@@ -177,7 +203,16 @@ def main() -> None:
 
     seed_all()
     device = dev()
-    all_rows: dict[str, dict[str, Any]] = {k: {} for k in ["mean_baseline", "nearest_neighbor", "direct_mlp", "raid"]}
+    all_rows: dict[str, dict[str, Any]] = {
+        k: {}
+        for k in [
+            "mean_baseline",
+            "nearest_neighbor",
+            "direct_mlp",
+            "raid",
+            "raid_crossattn",
+        ]
+    }
 
     for nd in SCALES:
         piece = eval_scale(nd, device, args.tau_min)

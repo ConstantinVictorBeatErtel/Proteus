@@ -1,0 +1,20 @@
+[
+  {
+    "update": 0,
+    "success_rate": 0.0,
+    "mean_reward": 0.4798213541507721,
+    "reward_std": 0.1751774251461029
+  },
+  {
+    "update": 1,
+    "success_rate": 0.0,
+    "mean_reward": 0.4353468418121338,
+    "reward_std": 0.35529625415802
+  },
+  {
+    "update": 2,
+    "success_rate": 0.0,
+    "mean_reward": 0.8862740993499756,
+    "reward_std": 0.5797322392463684
+  }
+]

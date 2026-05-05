@@ -19,7 +19,7 @@ if str(SRC_DIR) not in sys.path:
 
 from data import make_train_val, norm_stats_path
 from memory import RAIDMemoryBank
-from models import DirectMLP, RAIDDecoder
+from models import DirectMLP, RAIDDecoder, RAIDDecoderCrossAttn
 
 SEED = 42
 
@@ -116,10 +116,57 @@ def run_epoch_raid(
     return sse / max(1, n_elem)
 
 
+def run_epoch_raid_crossattn(
+    decoder: RAIDDecoderCrossAttn,
+    mem: RAIDMemoryBank,
+    loader: DataLoader,
+    dev: torch.device,
+    optim: torch.optim.Optimizer | None,
+    train: bool,
+) -> float:
+    if train:
+        decoder.train()
+    else:
+        decoder.eval()
+
+    sse = 0.0
+    n_elem = 0
+
+    for batch in loader:
+        s_t = batch["s_t"].to(dev)
+        s_n = batch["s_next"].to(dev)
+        y = batch["action"].to(dev)
+        idx = batch["idx"]
+
+        with torch.set_grad_enabled(train):
+            retr, mk = mem.retrieve_batch(
+                s_t,
+                s_n,
+                k=3,
+                tau_min=None,
+                exclude_idx=(idx.to(mem.device)) if train else None,
+            )
+            retr_b = retr.to(dev)
+            mk_b = mk.to(dev)
+            kv_pad = ~mk_b  # True = ignore invalid retrieved slot
+
+            pred, _ = decoder(s_t, s_n, retr_b, kv_key_padding_mask=kv_pad)
+
+            err_sum = torch.nn.functional.mse_loss(pred, y, reduction="sum")
+            if train and optim is not None:
+                optim.zero_grad(set_to_none=True)
+                (err_sum / pred.numel()).backward()
+                optim.step()
+
+        sse += float(err_sum.detach().cpu().item())
+        n_elem += int(pred.numel())
+
+    return sse / max(1, n_elem)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--condition", choices=["direct_mlp", "raid"], required=True)
+    ap.add_argument("--condition", choices=["direct_mlp", "raid", "raid_crossattn"], required=True)
     ap.add_argument("--n_demos", type=int, choices=[25, 50, 100, 200], required=True)
     args = ap.parse_args()
 
@@ -131,7 +178,7 @@ def main() -> None:
     stats_path = norm_stats_path(args.n_demos)
 
     mem: RAIDMemoryBank | None = None
-    if args.condition == "raid":
+    if args.condition in ("raid", "raid_crossattn"):
         mem = RAIDMemoryBank(
             obs_dim=train_ds.state_dim,
             action_dim=train_ds.action_dim,
@@ -143,6 +190,16 @@ def main() -> None:
     if args.condition == "direct_mlp":
         model = DirectMLP(train_ds.state_dim, train_ds.action_dim, hidden_dim=256, dropout=0.1).to(dev)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    elif args.condition == "raid_crossattn":
+        model = RAIDDecoderCrossAttn(
+            obs_dim=train_ds.state_dim,
+            action_dim=train_ds.action_dim,
+            k=3,
+            d_model=128,
+            nhead=4,
+        ).to(dev)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        assert mem is not None
     else:
         model = RAIDDecoder(train_ds.state_dim, train_ds.action_dim, hidden_dim=256, dropout=0.1).to(dev)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -161,6 +218,9 @@ def main() -> None:
         if args.condition == "direct_mlp":
             tr_mse = run_epoch_direct(model, tr_loader, dev, optim, train=True)
             va_mse = run_epoch_direct(model, va_loader, dev, optim=None, train=False)
+        elif args.condition == "raid_crossattn":
+            tr_mse = run_epoch_raid_crossattn(model, mem, tr_loader, dev, optim, train=True)
+            va_mse = run_epoch_raid_crossattn(model, mem, va_loader, dev, optim=None, train=False)
         else:
             tr_mse = run_epoch_raid(model, mem, tr_loader, dev, optim, train=True)
             va_mse = run_epoch_raid(model, mem, va_loader, dev, optim=None, train=False)
