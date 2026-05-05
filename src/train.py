@@ -195,8 +195,6 @@ def main() -> None:
             obs_dim=train_ds.state_dim,
             action_dim=train_ds.action_dim,
             k=3,
-            d_model=128,
-            nhead=4,
         ).to(dev)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
         assert mem is not None

@@ -75,8 +75,6 @@ def eval_scale(n_demos: int, device: torch.device, tau_min: float | None) -> dic
         obs_dim=train_ds.state_dim,
         action_dim=train_ds.action_dim,
         k=K_RETR,
-        d_model=128,
-        nhead=4,
     ).to(device)
     dm.load_state_dict(torch.load(dpath, map_location=device, weights_only=False)["model_state_dict"])
     rd.load_state_dict(torch.load(rpath, map_location=device, weights_only=False)["model_state_dict"])

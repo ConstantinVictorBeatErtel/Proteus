@@ -76,7 +76,12 @@ def main() -> None:
         checkpoint_dir="models",
         project_root=PROJECT_ROOT,
     )
-    sr_max = max((e["success_rate"] for e in log), default=0.0)
+    sr_vals = []
+    for e in log:
+        v = e.get("success_rate")
+        if isinstance(v, (int, float)):
+            sr_vals.append(float(v))
+    sr_max = max(sr_vals, default=0.0)
     print(f"\nDone. Best SR in logged updates: {sr_max:.3f}")
 
 

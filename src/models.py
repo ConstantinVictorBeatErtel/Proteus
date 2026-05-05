@@ -68,41 +68,55 @@ class RAIDDecoder(nn.Module):
 
 
 class RAIDDecoderCrossAttn(nn.Module):
-    """Cross-attention over retrieved actions: query from (s_t, s_next); keys/values from actions."""
+    """
+    Gated RAID decoder where mean-pooling of retrieved actions is replaced by
+    cross-attention weighting.  Attention scores are computed between a
+    d_model-dimensional query (from the transition) and d_model-dimensional keys
+    (from retrieved actions); the weights are then applied directly in action space
+    so the prior stays interpretable.  Inherits the gate + prior-dropout + prior-noise
+    regularisation that proved effective in the autoresearch (RAIDDecoder iter-7).
+    """
 
     def __init__(
         self,
         obs_dim: int,
         action_dim: int = 7,
         k: int = 3,
-        d_model: int = 128,
-        nhead: int = 4,
+        d_model: int = 64,
+        hidden_dim: int = 256,
+        dropout: float = 0.1,
     ):
         super().__init__()
+        import math as _math
+        self._sqrt_d = _math.sqrt(d_model)
         self.obs_dim = int(obs_dim)
         self.action_dim = int(action_dim)
         self.k = int(k)
         self.d_model = int(d_model)
 
         sx = self.obs_dim * 2
-        self.query_proj = nn.Linear(sx, d_model)
-        self.kv_proj = nn.Linear(action_dim, d_model)
-        self.attn = nn.MultiheadAttention(
-            d_model,
-            nhead,
-            batch_first=True,
-            dropout=0.1,
-        )
-        self.head = nn.Sequential(
-            nn.Linear(d_model * 2, 256),
-            nn.LayerNorm(256),
+        # Lightweight projections for attention scoring only.
+        self.q_proj = nn.Linear(sx, d_model)
+        self.k_proj = nn.Linear(action_dim, d_model)
+
+        # Gate + direct branch — same structure as winning RAIDDecoder.
+        self.gate_lin = nn.Linear(sx, action_dim)
+        self.direct = nn.Sequential(
+            nn.Linear(sx, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Linear(256, action_dim),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, action_dim),
         )
+        # Prior regularisation (proven in autoresearch iter-6/7).
+        self.prior_drop = nn.Dropout(p=0.5)
+        self._prior_noise_std = 0.1
+
+        # Learnable per-DOF std for GRPO stage.
         self.log_std = nn.Parameter(torch.full((action_dim,), -1.0))
 
     def forward(
@@ -116,30 +130,37 @@ class RAIDDecoderCrossAttn(nn.Module):
         Args:
             s_t, s_next: (B, obs_dim)
             retrieved_actions: (B, k, action_dim)
-            kv_key_padding_mask: optional (B, k), True = ignore this key position (padding).
+            kv_key_padding_mask: optional (B, k), True = ignore this position (padding).
         Returns:
             out: (B, action_dim)
-            attn_weights: (B, 1, k) when average_attn_weights=True (PyTorch default).
+            attn_weights: (B, 1, k)
         """
-        query = self.query_proj(torch.cat([s_t, s_next], dim=-1)).unsqueeze(1)  # (B, 1, d_model)
-        kv = self.kv_proj(retrieved_actions)  # (B, k, d_model)
+        import torch.nn.functional as F
+        x = torch.cat([s_t, s_next], dim=-1)  # (B, sx)
 
-        attn_out, attn_weights = self.attn(
-            query,
-            kv,
-            kv,
-            key_padding_mask=kv_key_padding_mask,
-            need_weights=True,
-            average_attn_weights=True,
-        )
-        attn_out = attn_out.squeeze(1)  # (B, d_model)
-        query_flat = query.squeeze(1)  # (B, d_model)
-        out = self.head(torch.cat([query_flat, attn_out], dim=-1))
+        # Attention weights over retrieved actions (scored in d_model space).
+        q = self.q_proj(x).unsqueeze(1)                              # (B, 1, d_model)
+        k = self.k_proj(retrieved_actions)                           # (B, k, d_model)
+        scores = (q @ k.transpose(-2, -1)) / self._sqrt_d            # (B, 1, k)
+        if kv_key_padding_mask is not None:
+            scores = scores.masked_fill(kv_key_padding_mask.unsqueeze(1), float("-inf"))
+        attn_weights = F.softmax(scores, dim=-1)                     # (B, 1, k)
 
-        # Ensure attn_weights is (B, 1, k) for visualization
-        if attn_weights.ndim == 2:
-            attn_weights = attn_weights.unsqueeze(1)
+        # Weighted retrieved action — stays in action space (interpretable prior).
+        a_prior_attn = (attn_weights @ retrieved_actions).squeeze(1)  # (B, action_dim)
 
+        # Gate + direct branch.
+        g = torch.sigmoid(self.gate_lin(x))
+        d = self.direct(x)
+
+        # Prior regularisation (dropout + noise, training only).
+        if self.training:
+            ap = self.prior_drop(a_prior_attn)
+            ap = ap + torch.randn_like(ap) * self._prior_noise_std
+        else:
+            ap = a_prior_attn
+
+        out = g * d + (1.0 - g) * ap
         return out, attn_weights
 
     def get_std(self) -> torch.Tensor:
