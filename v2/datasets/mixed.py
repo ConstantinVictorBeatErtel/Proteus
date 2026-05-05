@@ -137,6 +137,11 @@ class MixedIDMDataset(Dataset):
         member, local = self.member_for(gidx)
         ex = member.ds[local]  # type: ignore[index]
         ex = dict(ex)
+        if "obs_mask" not in ex:
+            obs = ex.get("obs_t") or ex.get("s_t")
+            if obs is None:
+                raise KeyError("obs_t")
+            ex["obs_mask"] = torch.ones(int(obs.shape[-1]), dtype=torch.bool)
         # Override ``idx`` with the global mixed-dataset index. The
         # FeatureMemoryBank's ``populate_vectorized`` stacks members
         # contiguously, so a child's local index is *not* the bank
