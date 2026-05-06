@@ -112,6 +112,13 @@ class DiffusionPolicyIDM(nn.Module):
         eps = self._eps(x_t, t, cond)
         return F.mse_loss(eps, noise)
 
+    # Wide x0 clamp range used for z-score-normalized actions. q01/q99
+    # cells override via ``clip_action_range``. Without any clamp the
+    # early reverse-process steps blow up because ``x0_pred`` divides by
+    # ``sqrt(alpha_bar) ≈ 1e-3`` at step 0; a runaway x0 then propagates
+    # through the schedule and produces val_mse in the tens of thousands.
+    _DEFAULT_X0_CLAMP_ZSCORE: tuple[float, float] = (-5.0, 5.0)
+
     @torch.no_grad()
     def sample(self, obs_t: torch.Tensor, obs_next: torch.Tensor) -> torch.Tensor:
         B = obs_t.shape[0]
@@ -119,15 +126,17 @@ class DiffusionPolicyIDM(nn.Module):
         cond = self._cond(obs_t, obs_next)
         x = torch.randn(B, self.action_dim, device=device)
         steps = torch.linspace(self.n_train_timesteps - 1, 0, self.n_inference_steps, device=device).long()
+        # Pick the active clamp once per call. q01/q99 mode supplies
+        # ``clip_action_range``; z-score mode falls back to a wide
+        # +-5 sigma range to keep the sampler numerically stable.
+        clip_lo, clip_hi = self.clip_action_range or self._DEFAULT_X0_CLAMP_ZSCORE
         for i, t in enumerate(steps):
             tt = t.expand(B)
             eps = self._eps(x, tt, cond)
             ab = self.alpha_bar[t]
             ab_prev = self.alpha_bar[steps[i + 1]] if i + 1 < len(steps) else torch.tensor(1.0, device=device)
             x0_pred = (x - torch.sqrt(1.0 - ab) * eps) / torch.sqrt(ab).clamp(min=1e-6)
-            if self.clip_action_range is not None:
-                lo, hi = self.clip_action_range
-                x0_pred = x0_pred.clamp(lo, hi)
+            x0_pred = x0_pred.clamp(clip_lo, clip_hi)
             sigma = torch.sqrt(((1 - ab_prev) / (1 - ab)).clamp(min=0.0)) * torch.sqrt((1 - ab / ab_prev).clamp(min=0.0))
             mean = torch.sqrt(ab_prev) * x0_pred + torch.sqrt((1 - ab_prev - sigma**2).clamp(min=0.0)) * eps
             if i + 1 < len(steps):
@@ -135,10 +144,7 @@ class DiffusionPolicyIDM(nn.Module):
                 x = mean + sigma * noise
             else:
                 x = mean
-        if self.clip_action_range is not None:
-            lo, hi = self.clip_action_range
-            return x.clamp(lo, hi)
-        return x
+        return x.clamp(clip_lo, clip_hi)
 
     def forward(self, obs_t: torch.Tensor, obs_next: torch.Tensor) -> torch.Tensor:
         """Sample a single action chunk (h=1)."""

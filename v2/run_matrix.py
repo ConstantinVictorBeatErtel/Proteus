@@ -38,8 +38,11 @@ def _expand_phase(phase: dict) -> list[CellConfig]:
     seeds = phase.get("seeds", [42])
     encoders = phase.get("encoders", [None])
     action_norm = phase.get("action_norm", "zscore")
+    strides = phase.get("strides", [int(phase.get("stride", 1))])
 
-    for head, dataset, n_demos, seed, encoder in product(heads, datasets, n_demos_list, seeds, encoders):
+    for head, dataset, n_demos, seed, encoder, stride in product(
+        heads, datasets, n_demos_list, seeds, encoders, strides,
+    ):
         cells.append(
             CellConfig(
                 phase=pid,
@@ -53,6 +56,7 @@ def _expand_phase(phase: dict) -> list[CellConfig]:
                 lr=float(phase.get("lr", 1e-3)),
                 weight_decay=float(phase.get("weight_decay", 1e-4)),
                 action_norm_mode=str(action_norm),
+                stride=int(stride),
             )
         )
     return cells

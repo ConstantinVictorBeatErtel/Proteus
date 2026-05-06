@@ -60,6 +60,10 @@ def _predict(head: str, model: torch.nn.Module, batch: dict[str, torch.Tensor], 
         return model.sample(obs_t, obs_n)
     if head == "knn":
         return model(obs_t, obs_n)
+    if head == "raid_xattn":
+        assert mem is not None
+        retr, mk = mem.retrieve_batch(obs_t, obs_n, k=3, tau_min=None, exclude_idx=None)
+        return model(obs_t, obs_n, retr.to(device), mk.to(device))
     raise ValueError(head)
 
 
@@ -67,11 +71,12 @@ def evaluate_cell(run_id: str, n_panels: int = 12, render_panels: bool = True) -
     cfg = _load_cell_config(run_id)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_ds, val_ds, obs_dim, action_dim = build_dataset(
-        cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder, action_norm_mode=cfg.action_norm_mode,
+        cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder,
+        action_norm_mode=cfg.action_norm_mode, stride=cfg.stride,
     )
 
     mem: FeatureMemoryBank | None = None
-    if cfg.head in {"raid", "knn"}:
+    if cfg.head in {"raid", "knn", "raid_xattn"}:
         mem = FeatureMemoryBank(
             obs_dim=obs_dim, action_dim=action_dim,
             max_entries=max(1024, len(train_ds) + 64),

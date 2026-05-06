@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from .legacy.memory import FeatureMemoryBank
 from .legacy.models import DirectMLP, RAIDDecoder
-from .heads import DiffusionPolicyIDM, KNNRetrievalHead, TransformerIDM
+from .heads import DiffusionPolicyIDM, KNNRetrievalHead, RAIDCrossAttnDecoder, TransformerIDM
 from .runtime.drive import CheckpointDir, atomic_save, runs_root, results_root
 from .runtime.wandb_resume import deterministic_run_id, init_run
 
@@ -57,13 +57,19 @@ class CellConfig:
     lr: float = 1e-3
     weight_decay: float = 1e-4
     action_norm_mode: str = "zscore"
+    stride: int = 1  # frame stride for image-feature cells; ignored for low-dim
 
     @property
     def run_id(self) -> str:
-        return deterministic_run_id(
+        # Stride is part of the run_id only when > 1 so existing
+        # stride=1 checkpoints stay valid after upgrading.
+        parts = [
             self.phase, self.head, self.dataset, self.encoder or "none",
             self.n_demos, self.seed, self.action_norm_mode,
-        )
+        ]
+        if int(self.stride) > 1:
+            parts.append(f"stride{int(self.stride)}")
+        return deterministic_run_id(*parts)
 
 
 def seed_all(seed: int) -> None:
@@ -98,6 +104,7 @@ def build_dataset(
     seed: int,
     encoder: str | None,
     action_norm_mode: str = "zscore",
+    stride: int = 1,
 ) -> tuple[Dataset, Dataset, int, int]:
     """Resolve the dataset name to ``(train_ds, val_ds, obs_dim, action_dim)``.
 
@@ -175,7 +182,7 @@ def build_dataset(
 
         train_ds, val_ds, obs_dim = build_feature_cached_train_val(
             dataset_name=dataset_name, encoder=encoder, n_demos=n_demos,
-            action_norm_mode=action_norm_mode,
+            action_norm_mode=action_norm_mode, stride=stride,
         )
         return train_ds, val_ds, obs_dim, 7
 
@@ -215,6 +222,8 @@ def build_head(
         if memory is None:
             raise ValueError("kNN head requires a populated FeatureMemoryBank")
         return KNNRetrievalHead(memory=memory, k=3)
+    if cfg.head == "raid_xattn":
+        return RAIDCrossAttnDecoder(obs_dim=obs_dim, action_dim=action_dim, hidden_dim=256, dropout=0.1)
     raise ValueError(f"unknown head {cfg.head!r}")
 
 
@@ -249,6 +258,13 @@ def _train_step(
         pred = model.sample(obs_t, obs_n)
     elif head == "knn":
         pred = model(obs_t, obs_n)
+    elif head == "raid_xattn":
+        assert mem is not None
+        retr, mk = mem.retrieve_batch(
+            obs_t, obs_n, k=3, tau_min=None,
+            exclude_idx=batch["idx"].to(mem.device) if train else None,
+        )
+        pred = model(obs_t, obs_n, retr.to(device), mk.to(device))
     else:
         raise ValueError(head)
     loss = torch.nn.functional.mse_loss(pred, y)
@@ -259,11 +275,12 @@ def train_cell(cfg: CellConfig, project: str = "raid_v2") -> dict[str, Any]:
     seed_all(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_ds, val_ds, obs_dim, action_dim = build_dataset(
-        cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder, action_norm_mode=cfg.action_norm_mode,
+        cfg.dataset, cfg.n_demos, cfg.seed, cfg.encoder,
+        action_norm_mode=cfg.action_norm_mode, stride=cfg.stride,
     )
 
     mem: FeatureMemoryBank | None = None
-    if cfg.head in {"raid", "knn"}:
+    if cfg.head in {"raid", "knn", "raid_xattn"}:
         mem = FeatureMemoryBank(
             obs_dim=obs_dim, action_dim=action_dim,
             max_entries=max(1024, len(train_ds) + 64),
@@ -359,7 +376,10 @@ def train_cell(cfg: CellConfig, project: str = "raid_v2") -> dict[str, Any]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--phase", default="ad-hoc")
-    ap.add_argument("--head", required=True, choices=["direct_mlp", "raid", "transformer", "diffusion", "knn"])
+    ap.add_argument(
+        "--head", required=True,
+        choices=["direct_mlp", "raid", "raid_xattn", "transformer", "diffusion", "knn"],
+    )
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--n_demos", type=int, required=True)
     ap.add_argument("--seed", type=int, default=42)

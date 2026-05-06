@@ -226,6 +226,7 @@ def _make_robomimic_image_cached(
     n_demos: int,
     action_norm_mode: str,
     train_frac: float = 0.8,
+    stride: int = 1,
 ) -> tuple[FeatureCachedDataset, FeatureCachedDataset, int]:
     rest = dataset_name[len("robomimic_") : -len("_image")]
     task, variant = rest.split("_")
@@ -239,19 +240,28 @@ def _make_robomimic_image_cached(
     _verify_feature_layout(dataset_name, encoder, feats, [(k, offsets[k][1]) for k in keys])
     train_keys, val_keys = _split_keys(keys, n_demos, train_frac)
 
+    stride = max(1, int(stride))
+
     def _build_transitions(demo_keys: list[str]) -> list[_Transition]:
         out: list[_Transition] = []
         with h5py.File(hdf5_path, "r") as f:
             for k in demo_keys:
                 base, length = offsets[k]
+                if length <= stride:
+                    continue
                 actions = np.asarray(f["data"][k]["actions"], dtype=np.float64)
-                for t in range(length - 1):
+                # Stride > 1 makes the IDM problem (o_t, o_{t+stride}) more
+                # informative for image-feature inputs, where adjacent
+                # 50 ms frames have near-identical CLS tokens. The action
+                # we predict is still ``a_t`` (the action that started the
+                # window), matching the LAPA recipe.
+                for t in range(length - stride):
                     g0 = float(actions[t, 6])
-                    g1 = float(actions[t + 1, 6])
+                    g1 = float(actions[t + stride, 6])
                     contact = abs(g1 - g0) > 0.1
                     out.append(_Transition(
                         feat_t_idx=base + t,
-                        feat_next_idx=base + t + 1,
+                        feat_next_idx=base + t + stride,
                         action=actions[t].copy(),
                         is_contact=bool(contact),
                         demo_key=k,
@@ -373,11 +383,20 @@ def build_feature_cached_train_val(
     n_demos: int,
     action_norm_mode: str = "q01_q99",
     train_frac: float = 0.8,
+    stride: int = 1,
 ) -> tuple[FeatureCachedDataset, FeatureCachedDataset, int]:
-    """Dispatch a feature-cached dataset by name."""
+    """Dispatch a feature-cached dataset by name.
+
+    ``stride`` controls the temporal gap between ``obs_t`` and ``obs_next``
+    inside each demo. With ``stride=1`` (default) we get adjacent-frame
+    IDM, which has a tiny visual delta at 20 Hz; ``stride=5`` (250 ms)
+    or ``stride=10`` (500 ms) give the encoder a meaningfully larger
+    visual change and tend to lift image-feature IDM val_mse noticeably.
+    """
     if dataset_name.startswith("robomimic_") and dataset_name.endswith("_image"):
         return _make_robomimic_image_cached(
-            dataset_name, encoder, n_demos, action_norm_mode, train_frac=train_frac
+            dataset_name, encoder, n_demos, action_norm_mode,
+            train_frac=train_frac, stride=stride,
         )
     if dataset_name.startswith("libero_"):
         return _make_libero_image_cached(

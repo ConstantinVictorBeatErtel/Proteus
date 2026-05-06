@@ -10,3 +10,4 @@ Diffusion-Policy IDM with horizon=1.
 from .transformer import TransformerIDM
 from .diffusion import DiffusionPolicyIDM
 from .knn import KNNRetrievalHead
+from .raid_xattn import RAIDCrossAttnDecoder
