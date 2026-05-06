@@ -85,8 +85,28 @@ def suite_config_name(suite: str) -> str:
     return suite
 
 
-def libero_suite_root(data_root: Path, suite: str) -> Path:
-    return Path(data_root) / "libero" / suite
+def libero_suite_root(libero_root: Path, suite: str) -> Path:
+    """Resolve ``<libero_root>/<suite>``.
+
+    ``libero_root`` is the directory that *contains* the suite folders
+    — typically ``<RAID_ARTIFACT_ROOT>/data/libero``. To stay tolerant
+    of callers that historically passed ``<artifact_root>/data``
+    (without the ``libero`` segment), we also accept that and append
+    the ``libero`` segment ourselves. This makes the function
+    symmetric: pass either the data root or the libero root, both
+    work.
+    """
+    p = Path(libero_root)
+    direct = p / suite
+    if direct.is_dir():
+        return direct
+    nested = p / "libero" / suite
+    if nested.is_dir():
+        return nested
+    # Neither exists yet — fall through to the canonical layout so the
+    # caller gets a clean FileNotFoundError pointing at the expected
+    # location.
+    return direct
 
 
 def find_image_key(obs_grp: h5py.Group) -> str:
@@ -106,17 +126,21 @@ def find_image_key(obs_grp: h5py.Group) -> str:
 
 def find_libero_episodes(
     suite: str,
-    data_root: Path,
+    libero_root: Path,
     max_demos: int | None = None,
 ) -> list[LiberoEpisode]:
-    """Walk ``<data_root>/libero/<suite>/*.hdf5`` and produce a flat,
+    """Walk ``<libero_root>/<suite>/*.hdf5`` and produce a flat,
     deterministically-ordered episode list.
+
+    ``libero_root`` is normally ``<RAID_ARTIFACT_ROOT>/data/libero`` but
+    callers that pass ``<RAID_ARTIFACT_ROOT>/data`` are also accepted —
+    :func:`libero_suite_root` handles both layouts.
 
     Order: HDF5 files sorted by filename, then ``demo_<N>`` sorted by N.
     Returning the FIRST ``max_demos`` episodes pools tasks roughly evenly
     when ``max_demos`` is much larger than the number of tasks (≈10).
     """
-    suite_root = libero_suite_root(data_root, suite)
+    suite_root = libero_suite_root(libero_root, suite)
     if not suite_root.is_dir():
         raise FileNotFoundError(
             f"missing LIBERO suite directory: {suite_root}\n"
