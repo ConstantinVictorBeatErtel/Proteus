@@ -24,9 +24,8 @@ import os
 import sys
 from pathlib import Path
 
-# Headless rendering: use osmesa (CPU software renderer) on servers without display
-os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
-os.environ.setdefault("MUJOCO_GL", "osmesa")
+# NOTE: EGL env vars are set at the very top of this file (lines 15-18).
+# Do NOT override them with osmesa here — we need GPU rendering for speed.
 
 # Force unbuffered stdout for real-time log visibility
 sys.stdout.reconfigure(line_buffering=True)
