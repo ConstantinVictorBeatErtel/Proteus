@@ -11,6 +11,12 @@ Usage:
 """
 from __future__ import annotations
 
+# Must set before any mujoco/robosuite import so EGL context picks them up.
+import os
+os.environ["MUJOCO_GL"] = "egl"
+os.environ["PYOPENGL_PLATFORM"] = "egl"
+os.environ["EGL_DEVICE_ID"] = "0"
+
 import argparse
 import copy
 import json
@@ -245,6 +251,7 @@ def main():
         "bddl_file_name": bddl_file,
         "camera_heights": 128,
         "camera_widths": 128,
+        "render_gpu_device_id": 0,
     })
     print(f"  LIBERO env ready", flush=True)
 

@@ -6,9 +6,8 @@ Key difference from rollout.py (RoboMimic):
   - GR-1 predicts next-frame features (predict_next_feat) = no (s_t, s_t) proxy hack
   - Memory bank keyed on GR-1 visual features, not low-dim state
 
-Speed note: osmesa (CPU) rendering takes ~337ms/step on this A10 instance.
-Set max_steps=30 for GRPO (30 × 337ms × G=4 ≈ 40s/update).
-With EGL (GPU rendering) this would be ~5ms/step — upgrade when available.
+Speed note: EGL (GPU) rendering takes ~5ms/step on A100.
+max_steps=150 gives full episode horizon for pick-and-place.
 
 Inference flow per step:
     frame_t  →  GR-1.encode_frames  →  feat_t          (384-dim)
@@ -17,6 +16,12 @@ Inference flow per step:
     action_norm  →  denormalise  →  LIBERO sim step
 """
 from __future__ import annotations
+
+# Must set before any mujoco/robosuite import so EGL context picks them up.
+import os
+os.environ["MUJOCO_GL"] = "egl"
+os.environ["PYOPENGL_PLATFORM"] = "egl"
+os.environ["EGL_DEVICE_ID"] = "0"
 
 import sys
 from pathlib import Path
@@ -111,6 +116,7 @@ def make_libero_env(task_idx: int = 0):
         "bddl_file_name": bddl,
         "camera_heights": 128,
         "camera_widths":  128,
+        "render_gpu_device_id": 0,
     }), Path(bddl).stem
 
 
@@ -128,13 +134,13 @@ def run_episode(
     device: str | torch.device = "cuda",
     deterministic: bool = False,
     k: int = 3,
-    max_steps: int = 30,
+    max_steps: int = 150,
 ) -> tuple[list, float, bool]:
     """
     Run one episode using LIBERO sim.
 
-    max_steps=30 by default to limit osmesa rendering overhead (~337ms/step).
-    Increase if using EGL/GPU rendering.
+    max_steps=150 by default for full pick-and-place episodes.
+    With EGL this is ~5ms/step on A100 — no need to shorten.
 
     Returns:
         trajectory: list of (feat_t, feat_next_pred, retrieved, action_taken)
