@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .drive import data_root
-from ..datasets.libero import LIBERO_SUITES, suite_config_name
+from ..datasets.libero import LIBERO_SUITES
 
 
 ROBOMIMIC_TASKS = ("lift", "can", "square", "transport")
@@ -33,7 +33,11 @@ ROBOMIMIC_BASE_URL = "http://downloads.cs.stanford.edu/downloads/rt_benchmark"
 # image (~58 GB) or Transport image (large + not in matrix).
 ROBOMIMIC_IMAGE_TASKS = ("can", "square")
 
-LIBERO_REPO = "openvla/modified_libero_rlds"
+# Historical: the OpenVLA-aligned RLDS at ``openvla/modified_libero_rlds``
+# was our first attempt to pull LIBERO from HF, but that mirror is
+# TFDS-format and the HF ``datasets`` library can't read it. We now
+# expect the user to stage the canonical LIBERO HDF5 release manually
+# and ``verify_libero`` confirms what landed on Drive.
 
 
 def repo_root() -> Path:
@@ -135,26 +139,51 @@ def libero_cache_dir() -> Path:
     return p
 
 
-def download_libero(suites: Iterable[str] = LIBERO_SUITES) -> list[DownloadResult]:
+def verify_libero(suites: Iterable[str] = LIBERO_SUITES) -> list[DownloadResult]:
+    """Verify that user-staged LIBERO HDF5 files are present on Drive.
+
+    Looks under ``<RAID_ARTIFACT_ROOT>/data/libero/<suite>/*.hdf5``.
+    The OpenVLA RLDS mirror is TFDS-format and isn't readable by HF
+    ``datasets``, so we ship no auto-download here — the user stages the
+    canonical LIBERO HDF5 release manually and this function reports
+    what we found.
+    """
+    from ..datasets.libero import find_libero_episodes
+
     cache = libero_cache_dir()
     results: list[DownloadResult] = []
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        print("[data_download] datasets not installed; skipping LIBERO")
-        return results
-
     for suite in suites:
+        suite_dir = cache / suite
         try:
-            load_dataset(LIBERO_REPO, name=suite_config_name(suite), cache_dir=str(cache), split="train")
-        except Exception as exc:
-            print(
-                f"[data_download] LIBERO {suite} skipped: {exc.__class__.__name__}: {exc}\n"
-                "  -> openvla/modified_libero_rlds is TFDS-format. To enable LIBERO\n"
-                "     phase E, switch to a parquet-format mirror or install\n"
-                "     tensorflow-datasets and write a TFDS reader."
-            )
+            eps = find_libero_episodes(suite, cache)
+        except FileNotFoundError:
+            print(f"[data_download] LIBERO {suite}: not staged (no HDF5 in {suite_dir})")
+            continue
+        size = _dir_size(suite_dir)
+        results.append(DownloadResult(f"libero/{suite}", suite_dir, skipped=True, bytes_on_disk=size))
+        print(
+            f"[data_download] LIBERO {suite}: {len(eps)} episodes "
+            f"({size / 1e9:.2f} GB) at {suite_dir}"
+        )
     return results
+
+
+# Backwards-compat alias so existing notebooks calling download_libero()
+# still work after we stopped trying to auto-fetch.
+def download_libero(suites: Iterable[str] = LIBERO_SUITES) -> list[DownloadResult]:
+    return verify_libero(suites)
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for p in path.rglob("*"):
+        if p.is_file():
+            total += p.stat().st_size
+    return total
 
 
 def ensure_all_data(

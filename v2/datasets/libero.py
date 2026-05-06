@@ -1,18 +1,38 @@
-"""LIBERO adapter via ``openvla/modified_libero_rlds``.
+"""LIBERO adapter — direct HDF5 reader.
 
-The OpenVLA-aligned RLDS exposes 7-D EE-delta + gripper actions and
-8-D state at 256x256, which lets us share the RoboMimic action head
-without per-dataset projection layers. Each suite is loaded as a
-single HF dataset; transitions are flattened across demos in
-trajectory-order, matching the IDM ``(obs_t, obs_next)`` recipe.
+Reads LIBERO HDF5 files staged on Drive at::
+
+    <RAID_ARTIFACT_ROOT>/data/libero/<suite>/*.hdf5
+
+Each suite (``libero_spatial``, ``libero_object``, ``libero_goal``,
+``libero_10``, ``libero_90``) contains one HDF5 per task, each with the
+canonical LIBERO schema::
+
+    data/
+      demo_0/
+        obs/
+          agentview_rgb     (T, H, W, 3) uint8
+          ee_pos / ee_ori / gripper_states / joint_states / ...
+        actions             (T, 7) float32
+      demo_1/ ...
+      ...
+    @attrs:
+      problem_info: JSON with language_instruction
+
+We pool tasks within a suite by walking files in deterministic
+``sorted(...)`` order, then demos in ``demo_<int>`` order, building one
+flat episode list per suite. Cached features and transitions both use
+that same ordering, and the ``cache_layout.layout_checksum`` mechanism
+catches any drift.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
+import h5py
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -20,242 +40,185 @@ from torch.utils.data import Dataset
 from .stats import ActionStats, compute_action_stats
 
 
-LIBERO_REPO = "openvla/modified_libero_rlds"
-LIBERO_SUITES = ("libero_spatial", "libero_object", "libero_goal")
-LIBERO_CONFIGS = {
-    "libero_spatial": "libero_spatial_no_noops",
-    "libero_object": "libero_object_no_noops",
-    "libero_goal": "libero_goal_no_noops",
-}
-LIBERO_IMAGE_KEYS = ("image", "agentview_rgb", "agentview_image")
+LIBERO_SUITES = (
+    "libero_spatial",
+    "libero_object",
+    "libero_goal",
+    "libero_10",
+    "libero_90",
+)
+LIBERO_IMAGE_KEYS = ("agentview_rgb", "agentview_image", "image")
 
 
 @dataclass(frozen=True)
 class LiberoSpec:
-    suite: str  # libero_spatial / libero_object / libero_goal
-    modality: str = "image"  # image only
+    suite: str
+    modality: str = "image"
 
     @property
     def name(self) -> str:
         return self.suite
 
 
+@dataclass(frozen=True)
+class LiberoEpisode:
+    """One demo within one HDF5 file."""
+
+    suite: str
+    hdf5_path: Path
+    demo_key: str  # e.g. demo_3
+    length: int   # number of timesteps == len(actions)
+
+    @property
+    def composite_key(self) -> str:
+        # Unique across (file, demo). Used as the visualization demo_key
+        # so the eval panels can always pull frames back from the right
+        # HDF5 file.
+        return f"{self.hdf5_path.name}::{self.demo_key}"
+
+
 def suite_config_name(suite: str) -> str:
-    if suite in LIBERO_CONFIGS:
-        return LIBERO_CONFIGS[suite]
-    if suite in LIBERO_CONFIGS.values():
-        return suite
-    raise ValueError(f"unknown LIBERO suite {suite!r}")
+    """Identity for compatibility with older callers; LIBERO suites are
+    referred to by their short names everywhere now."""
+    if suite not in LIBERO_SUITES:
+        raise ValueError(f"unknown LIBERO suite {suite!r}")
+    return suite
 
 
-def _load_hf_dataset(suite: str, cache_dir: Path):
-    from datasets import load_dataset
-
-    return load_dataset(LIBERO_REPO, name=suite_config_name(suite), cache_dir=str(cache_dir), split="train")
+def libero_suite_root(data_root: Path, suite: str) -> Path:
+    return Path(data_root) / "libero" / suite
 
 
-def _steps_for_row(row: Any) -> Any:
-    steps = row.get("steps")
-    if steps is None:
-        raise KeyError(
-            "LIBERO RLDS row is missing the required `steps` field. "
-            "This loader is verified against the dataset features.json schema."
-        )
-    return steps
-
-
-def _state_from_observation(obs: dict[str, Any]) -> np.ndarray:
-    for key in ("state", "robot_state"):
-        if key in obs and obs[key] is not None:
-            return np.asarray(obs[key], dtype=np.float32).reshape(-1)
-    raise KeyError("LIBERO observation is missing `state` / `robot_state`")
-
-
-def _image_from_observation(obs: dict[str, Any]) -> np.ndarray:
+def find_image_key(obs_grp: h5py.Group) -> str:
     for key in LIBERO_IMAGE_KEYS:
-        if key in obs and obs[key] is not None:
-            return np.asarray(obs[key], dtype=np.uint8)
-    raise KeyError(f"LIBERO observation is missing all image keys {LIBERO_IMAGE_KEYS}")
+        if key in obs_grp:
+            return key
+    # Heuristic: any (T, H, W, 3|4) dataset.
+    for key in obs_grp.keys():
+        shape = obs_grp[key].shape
+        if len(shape) == 4 and shape[-1] in (3, 4):
+            return key
+    raise KeyError(
+        f"no image-shaped dataset found under {obs_grp.name!r}; "
+        f"available keys: {list(obs_grp.keys())}"
+    )
 
 
-def _demo_key_for_row(row: Any, episode_idx: int) -> str:
-    meta = row.get("episode_metadata")
-    if isinstance(meta, dict):
-        file_path = meta.get("file_path")
-        if file_path:
-            return str(file_path)
-    return f"demo_{episode_idx:05d}"
+def find_libero_episodes(
+    suite: str,
+    data_root: Path,
+    max_demos: int | None = None,
+) -> list[LiberoEpisode]:
+    """Walk ``<data_root>/libero/<suite>/*.hdf5`` and produce a flat,
+    deterministically-ordered episode list.
 
-
-def episode_layout(ds: Any, max_demos: int | None = None) -> list[tuple[str, int]]:
-    out: list[tuple[str, int]] = []
-    n = len(ds) if max_demos is None else min(len(ds), int(max_demos))
-    for i in range(n):
-        row = ds[i]
-        steps = _steps_for_row(row)
-        out.append((_demo_key_for_row(row, i), len(steps)))
-    return out
-
-
-def iter_episode_frames(ds: Any, max_demos: int | None = None) -> Any:
-    n = len(ds) if max_demos is None else min(len(ds), int(max_demos))
-    for i in range(n):
-        row = ds[i]
-        for step in _steps_for_row(row):
-            yield _image_from_observation(step["observation"])
-
-
-def build_transitions_from_rlds(ds: Any, max_demos: int | None = None) -> list[dict[str, np.ndarray]]:
-    """Convert RLDS rows into a list of demo dicts ``{s, a, image}``.
-
-    Each row of ``ds`` corresponds to one full episode; we read the
-    ``steps`` field and lift it into per-timestep numpy arrays.
+    Order: HDF5 files sorted by filename, then ``demo_<N>`` sorted by N.
+    Returning the FIRST ``max_demos`` episodes pools tasks roughly evenly
+    when ``max_demos`` is much larger than the number of tasks (≈10).
     """
-    out: list[dict[str, np.ndarray]] = []
-    n = len(ds) if max_demos is None else min(len(ds), int(max_demos))
-    for i in range(n):
-        row = ds[i]
-        steps = _steps_for_row(row)
-        actions = []
-        states = []
-        images = []
-        for step in steps:
-            obs = step["observation"]
-            actions.append(np.asarray(step["action"], dtype=np.float64))
-            states.append(_state_from_observation(obs))
-            images.append(_image_from_observation(obs))
-        out.append(
-            {
-                "s": np.stack(states, axis=0).astype(np.float32),
-                "a": np.stack(actions, axis=0).astype(np.float32),
-                "image": np.stack(images, axis=0),
-                "_demo_key": np.asarray(_demo_key_for_row(row, i)),
-            }
+    suite_root = libero_suite_root(data_root, suite)
+    if not suite_root.is_dir():
+        raise FileNotFoundError(
+            f"missing LIBERO suite directory: {suite_root}\n"
+            "Stage the HDF5 files under <RAID_ARTIFACT_ROOT>/data/libero/<suite>/"
         )
-    return out
+    hdf5_paths = sorted(suite_root.glob("*.hdf5"))
+    if not hdf5_paths:
+        # Some LIBERO releases use .h5
+        hdf5_paths = sorted(suite_root.glob("*.h5"))
+    if not hdf5_paths:
+        raise FileNotFoundError(f"no HDF5 files in {suite_root}")
 
-
-def build_transitions(demos: list[dict[str, np.ndarray]]) -> list[tuple[np.ndarray, ...]]:
-    """``(s_t, s_next, a_t, is_contact, demo_key, t)`` flat list."""
-    out: list[tuple[np.ndarray, ...]] = []
-    for d in demos:
-        s = d["s"]
-        a = d["a"]
-        dk = str(np.asarray(d["_demo_key"]))
-        T = s.shape[0]
-        for t in range(T - 1):
-            g0 = float(a[t, 6]) if a.shape[1] > 6 else 0.0
-            g1 = float(a[t + 1, 6]) if a.shape[1] > 6 else 0.0
-            contact = abs(g1 - g0) > 0.1
-            out.append((s[t].copy(), s[t + 1].copy(), a[t].copy(), bool(contact), dk, int(t)))
-    return out
-
-
-class LiberoTransitionDataset(Dataset):
-    """LIBERO transitions sharing the common ``obs_t / obs_next / action`` schema."""
-
-    def __init__(
-        self,
-        spec: LiberoSpec,
-        demos: list[dict[str, np.ndarray]],
-        transitions: list[tuple[np.ndarray, ...]],
-        action_stats: ActionStats,
-    ) -> None:
-        self.spec = spec
-        self.demos = demos
-        self.transitions = transitions
-        self.action_dim = 7
-        self.stats = action_stats
-        self._q01 = torch.as_tensor(action_stats.q01, dtype=torch.float32)
-        self._q99 = torch.as_tensor(action_stats.q99, dtype=torch.float32)
-        self._demo_index = {str(np.asarray(d["_demo_key"])): i for i, d in enumerate(demos)}
-        self._obs_windows = self._build_obs_windows()
-
-    def __len__(self) -> int:
-        return len(self.transitions)
-
-    def _norm_action(self, a: torch.Tensor) -> torch.Tensor:
-        denom = (self._q99 - self._q01).clamp(min=1e-6)
-        return (2.0 * (a - self._q01) / denom - 1.0).clamp(-1.0, 1.0)
-
-    def _build_obs_windows(self) -> torch.Tensor:
-        if not self.transitions:
-            return torch.zeros(0, 4, 8, dtype=torch.float32)
-        obs_t = [torch.as_tensor(tr[0], dtype=torch.float32) for tr in self.transitions]
-        obs_next = [torch.as_tensor(tr[1], dtype=torch.float32) for tr in self.transitions]
-        demo_rows: dict[str, list[int]] = {}
-        for row_idx, tr in enumerate(self.transitions):
-            demo_rows.setdefault(str(tr[4]), []).append(row_idx)
-        windows = []
-        for row_idx, tr in enumerate(self.transitions):
-            demo_key = str(tr[4])
-            t = int(tr[5])
-            rows = demo_rows[demo_key]
-            windows.append(
-                torch.stack(
-                    [
-                        obs_t[rows[max(0, t - 2)]],
-                        obs_t[rows[max(0, t - 1)]],
-                        obs_t[row_idx],
-                        obs_next[row_idx],
-                    ],
-                    dim=0,
-                )
+    out: list[LiberoEpisode] = []
+    for hp in hdf5_paths:
+        with h5py.File(hp, "r") as f:
+            data_grp = f["data"]
+            demo_keys = sorted(
+                data_grp.keys(),
+                key=lambda k: int(str(k).replace("demo_", "")) if str(k).startswith("demo_") else 0,
             )
-        return torch.stack(windows, dim=0)
-
-    def __getitem__(self, idx: int) -> dict[str, Any]:
-        s_t_np, s_n_np, a_np, contact, demo_key, t = self.transitions[idx]
-        s_t = torch.as_tensor(s_t_np, dtype=torch.float32)
-        s_n = torch.as_tensor(s_n_np, dtype=torch.float32)
-        a = torch.as_tensor(a_np, dtype=torch.float32)
-        return {
-            "obs_t": s_t,
-            "obs_next": s_n,
-            "s_t": s_t,
-            "s_next": s_n,
-            "obs_window": self._obs_windows[int(idx)],
-            "action": self._norm_action(a),
-            "action_raw": a,
-            "is_contact": torch.tensor(bool(contact), dtype=torch.bool),
-            "idx": torch.tensor(idx, dtype=torch.long),
-            "demo_key": demo_key,
-            "t": torch.tensor(int(t), dtype=torch.long),
-            "dataset_id": torch.tensor(0, dtype=torch.long),
-        }
-
-    def fetch_frames(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
-        _, _, _, _, demo_key, t = self.transitions[idx]
-        d = self.demos[self._demo_index[str(demo_key)]]
-        if d.get("image") is None:
-            raise RuntimeError("no images materialized; load with keep_image_in_memory")
-        return d["image"][int(t)], d["image"][int(t) + 1]
+            for dk in demo_keys:
+                actions = data_grp[dk]["actions"]
+                out.append(
+                    LiberoEpisode(
+                        suite=suite,
+                        hdf5_path=hp,
+                        demo_key=dk,
+                        length=int(actions.shape[0]),
+                    )
+                )
+                if max_demos is not None and len(out) >= int(max_demos):
+                    return out
+    return out
 
 
-def make_train_val(
-    spec: LiberoSpec,
-    n_demos: int,
-    cache_dir: Path,
-    train_frac: float = 0.8,
-    action_stats: ActionStats | None = None,
-    keep_image_in_memory: bool = True,
-) -> tuple[LiberoTransitionDataset, LiberoTransitionDataset, ActionStats]:
-    raw = _load_hf_dataset(spec.suite, cache_dir)
-    demos = build_transitions_from_rlds(raw, max_demos=n_demos)
-    if not keep_image_in_memory:
-        for d in demos:
-            d["image"] = None  # type: ignore[assignment]
+def episode_layout(episodes: Iterable[LiberoEpisode]) -> list[tuple[str, int]]:
+    """``[(composite_key, length), ...]`` — used by the feature cache for layout verification."""
+    return [(ep.composite_key, ep.length) for ep in episodes]
 
-    n_train = int(np.ceil(train_frac * len(demos)))
-    train_demos = demos[:n_train]
-    val_demos = demos[n_train:]
-    train_triples = build_transitions(train_demos)
-    val_triples = build_transitions(val_demos)
 
-    if action_stats is None:
-        train_actions = np.stack([tr[2] for tr in train_triples], axis=0)
-        action_stats = compute_action_stats(train_actions)
+def iter_episode_frames(
+    episodes: Iterable[LiberoEpisode],
+    image_key: str | None = None,
+) -> Iterator[np.ndarray]:
+    """Yield every frame of every episode in order, exactly once."""
+    eps = list(episodes)
+    # Group consecutive episodes by file so we open each HDF5 only once.
+    by_file: dict[Path, list[LiberoEpisode]] = {}
+    file_order: list[Path] = []
+    for ep in eps:
+        if ep.hdf5_path not in by_file:
+            file_order.append(ep.hdf5_path)
+            by_file[ep.hdf5_path] = []
+        by_file[ep.hdf5_path].append(ep)
 
-    train_ds = LiberoTransitionDataset(spec, train_demos, train_triples, action_stats)
-    val_ds = LiberoTransitionDataset(spec, val_demos, val_triples, action_stats)
-    return train_ds, val_ds, action_stats
+    for hp in file_order:
+        with h5py.File(hp, "r") as f:
+            data_grp = f["data"]
+            for ep in by_file[hp]:
+                obs_grp = data_grp[ep.demo_key]["obs"]
+                key = image_key or find_image_key(obs_grp)
+                dset = obs_grp[key]
+                T = int(dset.shape[0])
+                if T != ep.length:
+                    raise RuntimeError(
+                        f"episode length mismatch for {ep.composite_key}: "
+                        f"image dset has {T} frames but actions has {ep.length}"
+                    )
+                for i in range(T):
+                    yield np.asarray(dset[i], dtype=np.uint8)
+
+
+def read_frames(
+    hdf5_path: Path,
+    demo_key: str,
+    timesteps: list[int] | np.ndarray,
+    image_key: str | None = None,
+) -> np.ndarray:
+    """Slice a few specific frames out of one episode for visualization."""
+    ts = sorted({int(t) for t in timesteps})
+    with h5py.File(hdf5_path, "r") as f:
+        obs_grp = f["data"][demo_key]["obs"]
+        key = image_key or find_image_key(obs_grp)
+        arr = obs_grp[key][ts, ...]
+    out_order = [ts.index(int(t)) for t in timesteps]
+    return arr[out_order]
+
+
+def read_actions(hdf5_path: Path, demo_key: str) -> np.ndarray:
+    """Per-episode action tensor as ``(T, 7) float64``."""
+    with h5py.File(hdf5_path, "r") as f:
+        return np.asarray(f["data"][demo_key]["actions"], dtype=np.float64)
+
+
+def verify_libero_root(data_root: Path) -> dict[str, int]:
+    """Return ``{suite_name: episode_count}`` for whatever suites are staged.
+    Used by :mod:`v2.runtime.data_download` to confirm Drive layout."""
+    out: dict[str, int] = {}
+    for suite in LIBERO_SUITES:
+        try:
+            eps = find_libero_episodes(suite, data_root)
+        except FileNotFoundError:
+            continue
+        out[suite] = len(eps)
+    return out

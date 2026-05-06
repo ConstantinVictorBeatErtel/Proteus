@@ -193,6 +193,9 @@ def test_mixed_dataset_padding_preserves_global_indices():
 
 
 def test_libero_suite_config_names():
-    assert suite_config_name("libero_spatial") == "libero_spatial_no_noops"
-    assert suite_config_name("libero_object") == "libero_object_no_noops"
-    assert suite_config_name("libero_goal") == "libero_goal_no_noops"
+    # The HDF5-based loader uses the short suite name directly (the old
+    # OpenVLA-RLDS ``_no_noops`` config names were a TFDS quirk).
+    assert suite_config_name("libero_spatial") == "libero_spatial"
+    assert suite_config_name("libero_object") == "libero_object"
+    assert suite_config_name("libero_goal") == "libero_goal"
+    assert suite_config_name("libero_10") == "libero_10"

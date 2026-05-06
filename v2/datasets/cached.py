@@ -299,64 +299,87 @@ def _make_libero_image_cached(
     n_demos: int,
     action_norm_mode: str,
     train_frac: float = 0.8,
+    stride: int = 1,
 ) -> tuple[FeatureCachedDataset, FeatureCachedDataset, int]:
     feats = _load_features(dataset_name, encoder)
-    raw = lb._load_hf_dataset(dataset_name, data_root() / "libero")
-    layout_entries = lb.episode_layout(raw)
+
+    suite = dataset_name  # "libero_spatial" / "libero_object" / "libero_goal" / "libero_10" / ...
+    episodes = lb.find_libero_episodes(suite, data_root() / "libero", max_demos=n_demos)
+    if not episodes:
+        raise RuntimeError(f"no episodes loaded for suite {suite!r}")
+
+    layout_entries = lb.episode_layout(episodes)
     _verify_feature_layout(dataset_name, encoder, feats, layout_entries)
 
-    subset = layout_entries[: max(1, int(n_demos))]
-    n_train = int(math.ceil(train_frac * len(subset)))
-    train_keys = {demo_key for demo_key, _ in subset[:n_train]}
-    val_keys = {demo_key for demo_key, _ in subset[n_train:]}
+    n_train = int(math.ceil(train_frac * len(episodes)))
+    train_eps = episodes[:n_train]
+    val_eps = episodes[n_train:]
 
-    demo_index: dict[str, int] = {}
+    # Demo offsets relative to the cached features tensor — same order as
+    # ``find_libero_episodes`` so feat row indexing matches the cache.
     offsets: dict[str, tuple[int, int]] = {}
     cursor = 0
-    for row_idx, (demo_key, length) in enumerate(layout_entries):
-        demo_index[demo_key] = row_idx
-        offsets[demo_key] = (cursor, length)
-        cursor += length
+    for ep in episodes:
+        offsets[ep.composite_key] = (cursor, ep.length)
+        cursor += ep.length
 
-    def _build_transitions(demo_keys: set[str]) -> list[_Transition]:
+    stride = max(1, int(stride))
+
+    # Cache the action arrays per (file, demo_key) so transition building
+    # touches each HDF5 once instead of opening it per timestep.
+    action_cache: dict[tuple[str, str], np.ndarray] = {}
+
+    def _actions_for(ep: lb.LiberoEpisode) -> np.ndarray:
+        key = (str(ep.hdf5_path), ep.demo_key)
+        if key not in action_cache:
+            action_cache[key] = lb.read_actions(ep.hdf5_path, ep.demo_key)
+        return action_cache[key]
+
+    def _build_transitions(eps: list[lb.LiberoEpisode]) -> list[_Transition]:
         out: list[_Transition] = []
-        for row_idx, (demo_key, length) in enumerate(layout_entries):
-            if demo_key not in demo_keys:
+        for ep in eps:
+            base, length = offsets[ep.composite_key]
+            if length <= stride:
                 continue
-            row = raw[row_idx]
-            steps = lb._steps_for_row(row)
-            base, _ = offsets[demo_key]
-            for t in range(length - 1):
-                a_t = np.asarray(steps[t]["action"], dtype=np.float64)
-                a_next = np.asarray(steps[t + 1]["action"], dtype=np.float64)
-                contact = abs(float(a_next[6]) - float(a_t[6])) > 0.1
+            actions = _actions_for(ep)
+            for t in range(length - stride):
+                # LIBERO's action[6] is the gripper command, same as RoboMimic.
+                g0 = float(actions[t, 6]) if actions.shape[1] > 6 else 0.0
+                g1 = float(actions[t + stride, 6]) if actions.shape[1] > 6 else 0.0
+                contact = abs(g1 - g0) > 0.1
                 out.append(
                     _Transition(
                         feat_t_idx=base + t,
-                        feat_next_idx=base + t + 1,
-                        action=a_t.copy(),
+                        feat_next_idx=base + t + stride,
+                        action=actions[t].copy(),
                         is_contact=bool(contact),
-                        demo_key=demo_key,
+                        demo_key=ep.composite_key,
                         t=int(t),
                     )
                 )
         return out
 
-    train_tr = _build_transitions(train_keys)
-    val_tr = _build_transitions(val_keys)
+    train_tr = _build_transitions(train_eps)
+    val_tr = _build_transitions(val_eps)
     if not train_tr:
-        raise RuntimeError(f"empty train split for {dataset_name!r}")
+        raise RuntimeError(
+            f"empty train split for {dataset_name!r} "
+            f"(n_demos={n_demos}, stride={stride}, episodes={len(episodes)})"
+        )
 
     train_actions = np.stack([tr.action for tr in train_tr], axis=0)
     action_stats = compute_action_stats(train_actions)
 
+    # For visualization: composite_key -> hdf5 path + raw demo key.
+    file_index: dict[str, tuple[Path, str]] = {
+        ep.composite_key: (ep.hdf5_path, ep.demo_key) for ep in episodes
+    }
+
     def _resolve(demo_key: str, t: int) -> tuple[np.ndarray, np.ndarray]:
-        row = raw[demo_index[demo_key]]
-        steps = lb._steps_for_row(row)
-        return (
-            lb._image_from_observation(steps[int(t)]["observation"]),
-            lb._image_from_observation(steps[int(t) + 1]["observation"]),
-        )
+        hp, raw_dk = file_index[demo_key]
+        # frame at t and t+stride for image preview matching the cell's stride.
+        frames = lb.read_frames(hp, raw_dk, [int(t), int(t) + stride])
+        return frames[0], frames[1]
 
     train_ds = FeatureCachedDataset(
         dataset_name=dataset_name,
@@ -400,6 +423,7 @@ def build_feature_cached_train_val(
         )
     if dataset_name.startswith("libero_"):
         return _make_libero_image_cached(
-            dataset_name, encoder, n_demos, action_norm_mode, train_frac=train_frac
+            dataset_name, encoder, n_demos, action_norm_mode,
+            train_frac=train_frac, stride=stride,
         )
     raise ValueError(f"unknown image-feature dataset: {dataset_name!r}")

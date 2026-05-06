@@ -62,13 +62,19 @@ class CellConfig:
     @property
     def run_id(self) -> str:
         # Stride is part of the run_id only when > 1 so existing
-        # stride=1 checkpoints stay valid after upgrading.
+        # stride=1 checkpoints stay valid after upgrading. The diffusion
+        # head bumps its revision suffix so the broken-sampler ckpts from
+        # before the x0-clamp fix get a new id and get retrained the
+        # next time the matrix runner sees them — without touching every
+        # other head's run_ids.
         parts = [
             self.phase, self.head, self.dataset, self.encoder or "none",
             self.n_demos, self.seed, self.action_norm_mode,
         ]
         if int(self.stride) > 1:
             parts.append(f"stride{int(self.stride)}")
+        if self.head == "diffusion":
+            parts.append("rev2_x0clamp")
         return deterministic_run_id(*parts)
 
 

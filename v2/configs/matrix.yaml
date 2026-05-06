@@ -79,14 +79,20 @@ phases:
     epochs: 50
     action_norm: q01_q99
 
-  # Phase E: multi-task retrieval test on LIBERO-Goal pooled across tasks.
-  # Optional — only runs if you have a parquet-format LIBERO mirror staged.
+  # Phase E: multi-task retrieval test on LIBERO-Spatial pooled across
+  # tasks. Reads HDF5s direct from <DRIVE>/data/libero/libero_spatial/
+  # (10 tasks x 50 demos = 500 episodes). The "n_demos" here is the
+  # total episodes pooled across tasks in deterministic
+  # filename-then-demo-index order, so 50 demos = roughly the first
+  # 5 demos of each task. Stride 5 brings the same image-IDM
+  # learnability lift we measured in phase Cs.
   - id: E
     heads: [direct_mlp, raid, raid_xattn]
-    datasets: [libero_goal]
-    n_demos: [50]
+    datasets: [libero_spatial]
+    n_demos: [50, 200]
     seeds: [42, 1337, 2024]
     encoders: [dinov2]
+    strides: [5]
     epochs: 50
     action_norm: q01_q99
 

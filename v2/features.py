@@ -274,19 +274,20 @@ def main() -> None:
                         batch_size=args.batch_size,
                     )
             elif dname.startswith("libero_"):
-                spec = lb.LiberoSpec(suite=dname)
-                # The OpenVLA-aligned LIBERO RLDS is TFDS-format; HF
-                # ``datasets`` cannot auto-load it. We attempt the load and
-                # let RuntimeError propagate to the per-dataset try/except
-                # below so the rest of the matrix is unblocked.
-                ds = lb._load_hf_dataset(spec.suite, data_root() / "libero")
-                layout_entries = lb.episode_layout(ds)
+                # Direct HDF5 read from <DRIVE>/data/libero/<suite>/*.hdf5.
+                # ``find_libero_episodes`` enforces a deterministic
+                # (filename, demo_<int>) ordering that the cached.py
+                # offsets and the cache_layout checksum both rely on.
+                episodes = lb.find_libero_episodes(dname, data_root() / "libero")
+                if not episodes:
+                    raise RuntimeError(f"no episodes for {dname!r}")
+                layout_entries = lb.episode_layout(episodes)
                 count = sum(length for _, length in layout_entries)
 
                 for enc_name, enc in encoders.items():
                     extract_dataset_features(
                         dataset_name=dname,
-                        frame_iter=lb.iter_episode_frames(ds),
+                        frame_iter=lb.iter_episode_frames(episodes),
                         encoder=enc,
                         expected_count=count,
                         episode_layout_entries=layout_entries,
