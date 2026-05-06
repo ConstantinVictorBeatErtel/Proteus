@@ -31,3 +31,4 @@ grpo_*.pid
 models/*.pt
 data/libero_spatial
 __pycache__/
+data/libero_spatial.zip
