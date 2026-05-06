@@ -58,11 +58,12 @@ def load_encoder(name: str, device: torch.device | str = "cuda") -> EncoderHandl
     hf_id = ENCODER_MAP[name]
     from transformers import AutoImageProcessor, AutoModel
 
-    model = AutoModel.from_pretrained(hf_id)
+    trust_remote_code = name == "theia"
+    model = AutoModel.from_pretrained(hf_id, trust_remote_code=trust_remote_code)
     model.eval()
     if torch.cuda.is_available() and str(device).startswith("cuda"):
         model = model.to(device).half()
-    proc = AutoImageProcessor.from_pretrained(hf_id)
+    proc = AutoImageProcessor.from_pretrained(hf_id, trust_remote_code=trust_remote_code)
 
     def _preprocess(frames: np.ndarray) -> torch.Tensor:
         # frames: (B, H, W, 3) uint8
