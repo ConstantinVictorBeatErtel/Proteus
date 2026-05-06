@@ -50,13 +50,16 @@ phases:
     epochs: 50
     action_norm: q01_q99
 
-  # Phase D: encoder ablation. DINOv2 vs Theia on the best-of-C head.
+  # Phase D: encoder ablation. DINOv2 (spatial self-supervised, phase C)
+  # vs SigLIP (semantic language-aligned, this phase) on the best-of-C
+  # head. SigLIP loads cleanly via standard transformers; we use only
+  # its vision tower (loader strips the text branch automatically).
   - id: D
     heads: [transformer]
     datasets: [robomimic_square_ph_image]
     n_demos: [200]
     seeds: [42, 1337, 2024]
-    encoders: [theia]
+    encoders: [siglip]
     epochs: 50
     action_norm: q01_q99
 

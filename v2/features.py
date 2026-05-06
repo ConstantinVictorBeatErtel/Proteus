@@ -2,9 +2,15 @@
 
 Encoders supported:
 
-* ``dinov2``  -> ``facebook/dinov2-base`` (~86 M params, 768-D CLS).
-* ``theia``   -> ``theaiinstitute/theia-base-patch16-224-cdiv``
-                 (robot-specific distillation, 86 M, 768-D).
+* ``dinov2``  -> ``facebook/dinov2-base`` (~86 M params, 768-D CLS;
+                 spatial self-supervised pretraining).
+* ``siglip``  -> ``google/siglip-base-patch16-224`` (~93 M params,
+                 768-D pooler from the vision tower; language-aligned
+                 contrastive pretraining; OpenVLA's encoder of choice).
+
+Phase D's encoder ablation is therefore "spatial self-supervised
+(DINOv2)" vs "semantic language-aligned (SigLIP)" — the same axis the
+strategy doc calls out.
 
 Output: one safetensors per ``(dataset, encoder)`` written atomically to
 ``<artifact_root>/features/<dataset>_<encoder>_cls.safetensors`` with a
@@ -38,7 +44,7 @@ from .datasets.cache_layout import (
 
 ENCODER_MAP: dict[str, str] = {
     "dinov2": "facebook/dinov2-base",
-    "theia": "theaiinstitute/theia-base-patch16-224-cdiv",
+    "siglip": "google/siglip-base-patch16-224",
 }
 
 
@@ -52,18 +58,28 @@ class EncoderHandle:
 
 
 def load_encoder(name: str, device: torch.device | str = "cuda") -> EncoderHandle:
-    """Load a frozen encoder, eval mode, fp16 on CUDA."""
+    """Load a frozen encoder, eval mode, fp16 on CUDA.
+
+    Both supported encoders load through ``AutoModel.from_pretrained``
+    without ``trust_remote_code`` and without any nested-from_pretrained
+    quirks, so we don't need monkey-patching for the meta-device bug
+    that affects e.g. Theia under newer transformers releases.
+    """
     if name not in ENCODER_MAP:
         raise ValueError(f"unknown encoder {name!r}; pick from {list(ENCODER_MAP)}")
     hf_id = ENCODER_MAP[name]
     from transformers import AutoImageProcessor, AutoModel
 
-    trust_remote_code = name == "theia"
-    model = AutoModel.from_pretrained(hf_id, trust_remote_code=trust_remote_code)
+    model = AutoModel.from_pretrained(hf_id)
+    # SigLIP returns a SiglipModel with both a vision tower and a text
+    # tower; we only want the vision side. DINOv2 returns a Dinov2Model
+    # directly so the attribute check is a no-op.
+    if hasattr(model, "vision_model"):
+        model = model.vision_model
     model.eval()
     if torch.cuda.is_available() and str(device).startswith("cuda"):
         model = model.to(device).half()
-    proc = AutoImageProcessor.from_pretrained(hf_id, trust_remote_code=trust_remote_code)
+    proc = AutoImageProcessor.from_pretrained(hf_id)
 
     def _preprocess(frames: np.ndarray) -> torch.Tensor:
         # frames: (B, H, W, 3) uint8
@@ -222,52 +238,66 @@ def main() -> None:
     from .datasets import libero as lb
 
     for dname in args.datasets:
-        if dname.startswith("robomimic_"):
-            _, task, variant, _ = dname.split("_", 3)
-            spec = rm.RoboMimicSpec(task=task, variant=variant, modality="image")
-            hp = rm.hdf5_path_for(spec, data_root() / "robomimic")
-            import h5py
+        try:
+            if dname.startswith("robomimic_"):
+                _, task, variant, _ = dname.split("_", 3)
+                spec = rm.RoboMimicSpec(task=task, variant=variant, modality="image")
+                hp = rm.hdf5_path_for(spec, data_root() / "robomimic")
+                import h5py
 
-            with h5py.File(hp, "r") as f:
-                sorted_keys = sorted(f["data"], key=lambda x: int(x.split("_")[1]))
-                layout_entries = [(dk, int(f["data"][dk]["actions"].shape[0])) for dk in sorted_keys]
+                if not hp.is_file():
+                    raise FileNotFoundError(
+                        f"missing RoboMimic image HDF5 for {dname}: {hp}. "
+                        "Run the RoboMimic image download cell first."
+                    )
+
+                with h5py.File(hp, "r") as f:
+                    sorted_keys = sorted(f["data"], key=lambda x: int(x.split("_")[1]))
+                    layout_entries = [(dk, int(f["data"][dk]["actions"].shape[0])) for dk in sorted_keys]
+                    count = sum(length for _, length in layout_entries)
+
+                def _frames_iter() -> Iterable[np.ndarray]:
+                    with h5py.File(hp, "r") as f:
+                        for dk, _length in layout_entries:
+                            dset = f["data"][dk]["obs"][rm.IMAGE_OBS_KEY]
+                            for i in range(int(dset.shape[0])):
+                                yield np.asarray(dset[i], dtype=np.uint8)
+
+                for enc_name, enc in encoders.items():
+                    extract_dataset_features(
+                        dataset_name=dname,
+                        frame_iter=_frames_iter(),
+                        encoder=enc,
+                        expected_count=count,
+                        episode_layout_entries=layout_entries,
+                        device=device,
+                        batch_size=args.batch_size,
+                    )
+            elif dname.startswith("libero_"):
+                spec = lb.LiberoSpec(suite=dname)
+                # The OpenVLA-aligned LIBERO RLDS is TFDS-format; HF
+                # ``datasets`` cannot auto-load it. We attempt the load and
+                # let RuntimeError propagate to the per-dataset try/except
+                # below so the rest of the matrix is unblocked.
+                ds = lb._load_hf_dataset(spec.suite, data_root() / "libero")
+                layout_entries = lb.episode_layout(ds)
                 count = sum(length for _, length in layout_entries)
 
-            def _frames_iter() -> Iterable[np.ndarray]:
-                with h5py.File(hp, "r") as f:
-                    for dk, _length in layout_entries:
-                        dset = f["data"][dk]["obs"][rm.IMAGE_OBS_KEY]
-                        for i in range(int(dset.shape[0])):
-                            yield np.asarray(dset[i], dtype=np.uint8)
-
-            for enc_name, enc in encoders.items():
-                extract_dataset_features(
-                    dataset_name=dname,
-                    frame_iter=_frames_iter(),
-                    encoder=enc,
-                    expected_count=count,
-                    episode_layout_entries=layout_entries,
-                    device=device,
-                    batch_size=args.batch_size,
-                )
-        elif dname.startswith("libero_"):
-            spec = lb.LiberoSpec(suite=dname)
-            ds = lb._load_hf_dataset(spec.suite, data_root() / "libero")
-            layout_entries = lb.episode_layout(ds)
-            count = sum(length for _, length in layout_entries)
-
-            for enc_name, enc in encoders.items():
-                extract_dataset_features(
-                    dataset_name=dname,
-                    frame_iter=lb.iter_episode_frames(ds),
-                    encoder=enc,
-                    expected_count=count,
-                    episode_layout_entries=layout_entries,
-                    device=device,
-                    batch_size=args.batch_size,
-                )
-        else:
-            print(f"[features] unknown dataset {dname!r}, skipping")
+                for enc_name, enc in encoders.items():
+                    extract_dataset_features(
+                        dataset_name=dname,
+                        frame_iter=lb.iter_episode_frames(ds),
+                        encoder=enc,
+                        expected_count=count,
+                        episode_layout_entries=layout_entries,
+                        device=device,
+                        batch_size=args.batch_size,
+                    )
+            else:
+                print(f"[features] unknown dataset {dname!r}, skipping")
+        except Exception as exc:  # noqa: BLE001 — never let one dataset kill the rest
+            print(f"[features] FAIL {dname}: {exc.__class__.__name__}: {exc}")
+            continue
 
 
 if __name__ == "__main__":
