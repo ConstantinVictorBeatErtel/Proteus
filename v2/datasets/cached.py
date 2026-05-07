@@ -304,24 +304,27 @@ def _make_libero_image_cached(
     feats = _load_features(dataset_name, encoder)
 
     suite = dataset_name  # "libero_spatial" / "libero_object" / "libero_goal" / "libero_10" / ...
-    episodes = lb.find_libero_episodes(suite, data_root() / "libero", max_demos=n_demos)
-    if not episodes:
+    # The feature cache was built over every episode in the suite (see
+    # v2.features), so its layout_checksum and row layout are over the full
+    # list. Verify against the full list and build offsets over it; only
+    # then slice to ``n_demos`` for the train/val pool.
+    all_episodes = lb.find_libero_episodes(suite, data_root() / "libero")
+    if not all_episodes:
         raise RuntimeError(f"no episodes loaded for suite {suite!r}")
 
-    layout_entries = lb.episode_layout(episodes)
-    _verify_feature_layout(dataset_name, encoder, feats, layout_entries)
+    full_layout_entries = lb.episode_layout(all_episodes)
+    _verify_feature_layout(dataset_name, encoder, feats, full_layout_entries)
 
+    offsets: dict[str, tuple[int, int]] = {}
+    cursor = 0
+    for ep in all_episodes:
+        offsets[ep.composite_key] = (cursor, ep.length)
+        cursor += ep.length
+
+    episodes = all_episodes[: max(1, int(n_demos))]
     n_train = int(math.ceil(train_frac * len(episodes)))
     train_eps = episodes[:n_train]
     val_eps = episodes[n_train:]
-
-    # Demo offsets relative to the cached features tensor — same order as
-    # ``find_libero_episodes`` so feat row indexing matches the cache.
-    offsets: dict[str, tuple[int, int]] = {}
-    cursor = 0
-    for ep in episodes:
-        offsets[ep.composite_key] = (cursor, ep.length)
-        cursor += ep.length
 
     stride = max(1, int(stride))
 
