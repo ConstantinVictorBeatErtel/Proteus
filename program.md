@@ -1,70 +1,121 @@
-markdown# RAID Autoresearch Program
+# RAID Visual — Retrieval-Augmented Inverse Dynamics with V-JEPA 2
 
-## What you are doing
-You are an AI research agent autonomously improving the RAID (Retrieval-Augmented Inverse Dynamics) decoder for robot manipulation. You modify `src/models.py`, run a training experiment, check if the result improved, keep or discard the change, and repeat.
+## What RAID is and why retrieval helps
 
-## The problem
-RAID is supposed to outperform a direct MLP inverse dynamics model in low-data regimes by using a memory bank of demonstrated transitions as a prior. It currently fails:
+RAID (Retrieval-Augmented Inverse Dynamics) learns a mapping from state transitions
+(s_t, s_{t+1}) to actions a_t by querying a memory bank of past transitions. Instead
+of learning a pure parametric mapping (which overfits at low data), RAID anchors each
+prediction in real executed actions from similar past transitions.
 
-| Condition | 25 demos | 50 demos | 100 demos | 200 demos |
-|---|---|---|---|---|
-| Direct MLP (baseline to beat) | 0.336 | 0.358 | 0.296 | 0.183 |
-| RAID (current, broken) | 0.444 | 0.512 | 0.536 | 0.424 |
-| Nearest neighbor | 0.617 | 0.744 | 0.717 | 0.567 |
+The scientific framing: DreamZero (NVIDIA, arXiv 2602.15922) validates that world
+models decompose into (1) video prediction and (2) inverse dynamics model (IDM).
+RAID is a retrieval-augmented IDM that replaces expensive CEM search with a single
+decoder forward pass. V-JEPA 2 is a true JEPA-style world model — it predicts in
+latent embedding space, not pixels — unlike GR-1 which is pixel-space autoregressive.
 
-RAID is worse than direct MLP at every scale. The root cause: the decoder takes the path of least resistance and copies the noisy retrieved prior (a_prior) rather than learning from the state transition (s_t, s_next). The prior is the mean of k=3 not-quite-right retrieved actions, so copying it hurts.
+## The 5 conditions and why they form a fair ablation
 
-## The metric
-Run: `python3 src/train.py --condition raid --n_demos 25`
-Read val_mse from the final printed line: `[train] best checkpoint val_mse=X.XXXXXX`
-**Target: val_mse < 0.336 (beat direct MLP at 25 demos)**
-Secondary target: val_mse < 0.444 (beat current RAID)
+All five conditions use IDENTICAL frozen V-JEPA 2 ViT-L features (feat_dim=1024).
+The only thing that varies is the decoder architecture and whether retrieval is used.
 
-## The file you edit
-**`src/models.py`** — specifically the `RAIDDecoder` class. You may also edit the `forward()` call signature if needed, but `src/train.py` calls it as `decoder(s_t, s_n, prior)` so keep that interface or update train.py consistently.
+1. **mean_action**: Predict the mean of all training actions. Trivial baseline —
+   measures how much variance there is in the action space.
 
-Current RAIDDecoder:
-```python
-def forward(self, s_t, s_next, a_prior):
-    return self.net(torch.cat([s_t, s_next, a_prior], dim=-1))
+2. **nn_copy**: For each validation transition, retrieve the single most similar
+   train transition and copy its action. Measures how far raw retrieval goes
+   without any learned model.
+
+3. **direct_mlp**: A 3-layer MLP on concat(feat_t, feat_next). The pure parametric
+   inverse dynamics model — strong at high data, weak at low data.
+
+4. **concat_mlp**: Same MLP architecture but with concat(feat_t, feat_next,
+   pooled_retrieved_actions) as input. Retrieval-augmented, but with a simple
+   fusion (mean-pool). This is the FAIR comparison point — any advantage of
+   cross-attention in condition 5 must come from the attention mechanism, not
+   from retrieval or features.
+
+5. **raid_xattn**: Full RAID with multi-head cross-attention. The transition
+   features form a query; retrieved actions form keys/values; attention-learned
+   weights produce the output. This is the proposed architecture.
+
+**Expected result**: raid_xattn < concat_mlp <= direct_mlp at low data.
+At high data, all three learned conditions converge as data dominates retrieval.
+
+## Autoresearch hypotheses
+
+Karpathy-style self-improving agent loop. Each iteration changes ONE thing:
+
+| Iter | Name           | Change                                     |
+|------|----------------|--------------------------------------------|
+| 0    | baseline       | RAIDDecoderVisual as specified (k=5, h=512, heads=8) |
+| 1    | h1_k10         | Increase k to 10                           |
+| 2    | h2_k3          | Decrease k to 3                            |
+| 3    | h3_2xattn      | Two cross-attention layers                 |
+| 4    | h4_posenc      | Sort by similarity + learned position enc. |
+| 5    | h5_feat_t_only | Query on feat_t only (not feat_t||feat_next) |
+| 6    | h6_gate_blend  | Sigmoid gate blending xattn with mean-pool |
+| 7    | h7_hidden1024  | Hidden dim 1024 instead of 512             |
+| 8    | h8_noise005    | Gaussian noise std=0.05 on retrieved actions |
+
+## How to run everything end to end
+
+### Step 1 — Test encoder
+```bash
+python src/vjepa_encoder.py
 ```
-Input: concat(s_t [19-dim], s_next [19-dim], a_prior [7-dim]) = 45-dim
-Output: a_hat [7-dim]
 
-## Hypotheses to try (in order)
-1. **Residual prediction**: return `a_prior + self.net(concat(s_t, s_next, a_prior))`. Decoder learns only the correction delta. If prior is bad, delta → 0 and output falls back to prior.
-2. **Learned gate**: `g = sigmoid(Linear(state_dim*2, action_dim)(concat(s_t, s_next)))`. Output: `g * mlp(s_t, s_next) + (1-g) * a_prior`. Gate learns when to trust retrieval vs parametric.
-3. **Detached prior**: `a_prior_detached = a_prior.detach()`. Stop gradients from flowing through the prior. Forces decoder to treat prior as fixed context, not a learnable shortcut.
-4. **Separate encoders**: encode (s_t, s_next) and a_prior through separate linear projections before concatenating. Gives the model separate representations for transition and prior.
-5. **Prior as residual with learned scale**: `scale = sigmoid(Linear(state_dim*2, 1)(concat(s_t, s_next)))`. Output: `scale * a_prior + self.net(concat(s_t, s_next))`. Learned scalar weight on the prior.
-6. **Free hypothesis**: propose your own architectural change based on what you've observed.
-
-## Loop instructions
-1. Read the current best val_mse from `configs/autoresearch_log.md` (create if missing, start with baseline 0.444)
-2. Pick the next hypothesis to try (or propose your own if you have a better idea)
-3. Edit `src/models.py` to implement the change
-4. Run: `python3 src/train.py --condition raid --n_demos 25`
-5. Read the val_mse from output
-6. If improved: keep the change, update `configs/autoresearch_log.md`, run full eval at all scales: `python3 src/run_all.py` (only RAID conditions), regenerate figures
-7. If worse: revert `src/models.py` to the previous version, log the result as a failure
-8. Repeat for at least 8 iterations or until val_mse < 0.336
-9. After completing all iterations: run `python3 src/run_all.py` for all conditions, regenerate all figures, push to GitHub: `git add -A && git commit -m "autoresearch: best RAID val_mse=X.XXX after N iterations" && git push origin main`
-
-## Log format
-Append to `configs/autoresearch_log.md` after each iteration:
-```
-## Iteration N
-- Hypothesis: [name]
-- Change: [one-line description]
-- val_mse: X.XXXXX
-- vs baseline: [improved/worse]
-- Decision: [kept/reverted]
-- Notes: [any observations]
+### Step 2 — Dry run to verify pipeline
+```bash
+python src/cache_vjepa_features.py \
+    --dataset_dir /home/ubuntu/RAID/data/libero_spatial/libero_spatial \
+    --output_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda --dry_run
 ```
 
-## Constraints
-- Only edit `src/models.py` and `src/train.py` (if needed for interface changes)
-- Do not change the data pipeline, memory bank, or evaluation code
-- Do not change n_demos=25 for the iteration metric — this is the hardest regime
-- Each experiment must complete fully before starting the next
-- If training crashes, log it as a failure and revert
+### Step 3 — Cache features (run once, ~30-45 min)
+```bash
+python src/cache_vjepa_features.py \
+    --dataset_dir /home/ubuntu/RAID/data/libero_spatial/libero_spatial \
+    --output_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda
+```
+
+### Step 4 — Fair comparison sweep (~2-4 hours)
+```bash
+python src/run_all_libero.py \
+    --feature_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda
+```
+
+### Step 5 — Autoresearch (~4-8 hours, run in tmux)
+```bash
+tmux new -s autoreach
+python src/autoresearch_libero.py \
+    --feature_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --n_iter 9 --device cuda
+```
+
+## Expected results and interpretation
+
+### Ablation experiment
+At N=25 demos (low-data regime), we expect:
+- mean_action: highest MSE (no learning, no retrieval)
+- nn_copy: lower than mean_action (retrieval-only, no learning)
+- direct_mlp: moderate (parametric-only, starts to overfit)
+- concat_mlp: lower than direct_mlp (retrieval helps via feature augmentation)
+- raid_xattn: lowest MSE (retrieval + learned attention weighting)
+
+At N=200 demos, all three learned conditions should converge.
+
+### Autoresearch
+The loop should identify at least 1-2 improvements over the baseline.
+Common findings:
+- Small k (3) often better than large k (10) — fewer but more relevant neighbours
+- Noise regularisation on retrieved actions helps generalisation
+- Simple architectures (1-layer cross-attn, moderate hidden dim) outperform
+  complex ones at low data
+
+### Critical fairness constraint
+ALL conditions use IDENTICAL frozen V-JEPA 2 features as input.
+The only thing that varies is the decoder architecture and whether
+retrieval is used. This is non-negotiable.

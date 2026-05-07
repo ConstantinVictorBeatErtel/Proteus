@@ -125,3 +125,99 @@ Approximate runtime stack:
 - Matplotlib (`notebooks/` scripts)
 
 CUDA is used automatically when available (`train.py`, `evaluate.py`).
+
+---
+
+## Visual RAID with V-JEPA 2
+
+This extension replaces low-dimensional proprioception with **frozen V-JEPA 2 ViT-L**
+visual features (1024-dim) on the **LIBERO-Spatial** benchmark — 10 manipulation tasks
+with 50 demonstrations each. All conditions share the same cached encoder features,
+enabling a **fair ablation** of decoder architectures and retrieval mechanisms.
+
+### Scientific framing
+
+DreamZero (NVIDIA, arXiv 2602.15922) validates that world models decompose into
+(1) video prediction and (2) inverse dynamics model (IDM). RAID is a retrieval-augmented
+IDM that replaces expensive CEM search with a single decoder forward pass. V-JEPA 2
+predicts in latent embedding space (true JEPA-style), unlike pixel-space autoregressive
+models such as GR-1.
+
+### Conditions (all use identical frozen 1024-dim features)
+
+| Condition | Model | Retrieval | Fusion |
+|-----------|-------|-----------|--------|
+| `mean_action` | None | No | Train mean |
+| `nn_copy` | None | Yes (top-1) | Copy neighbour |
+| `direct_mlp` | 3-layer MLP | No | Concat(feat_t, feat_next) |
+| `concat_mlp` | 3-layer MLP | Yes (k=5) | Concat + mean-pool |
+| `raid_xattn` | Cross-attention decoder | Yes (k=5) | Learned attention |
+
+### Execution order
+
+**Step 1 — Test encoder:**
+```bash
+python src/vjepa_encoder.py
+```
+Expected output: `torch.Size([4, 1024])`
+
+**Step 2 — Dry run to verify pipeline:**
+```bash
+python src/cache_vjepa_features.py \
+    --dataset_dir /home/ubuntu/RAID/data/libero_spatial/libero_spatial \
+    --output_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda --dry_run
+```
+
+**Step 3 — Cache features (run once, ~30-45 min):**
+```bash
+python src/cache_vjepa_features.py \
+    --dataset_dir /home/ubuntu/RAID/data/libero_spatial/libero_spatial \
+    --output_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda
+```
+
+**Step 4 — Fair comparison sweep (~2-4 hours):**
+```bash
+python src/run_all_libero.py \
+    --feature_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --device cuda
+```
+
+**Step 5 — Autoresearch loop (~4-8 hours, run in tmux):**
+```bash
+tmux new -s autoreach
+python src/autoresearch_libero.py \
+    --feature_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+    --n_iter 9 --device cuda
+```
+
+### Artifacts produced
+
+| Path | Content |
+|------|---------|
+| `data/libero_spatial/vjepa_features/*.pt` | Cached V-JEPA 2 features (one per task) |
+| `configs/norm_stats_{N}demos_vjepa.pt` | Per-scale action normalisation stats |
+| `configs/results_vjepa.json` | Full sweep results (5 conditions × 4 scales) |
+| `configs/autoresearch_log.json` | All autoresearch iterations with val_mse |
+| `models/{condition}_{N}demos_vjepa_best.pt` | Best checkpoint per condition/scale |
+
+### Critical fairness constraint
+
+ALL five conditions use IDENTICAL frozen V-JEPA 2 features as input (`feat_dim=1024`).
+The only thing that varies between conditions is the decoder architecture and whether
+retrieval is used. No condition trains or fine-tunes the encoder.
+
+### New source files
+
+| File | Role |
+|------|------|
+| `src/vjepa_encoder.py` | Frozen V-JEPA 2 ViT-L encoder wrapper |
+| `src/cache_vjepa_features.py` | Feature caching script |
+| `src/data_libero.py` | LIBERO data loaders + `CachedVJEPADataset` |
+| `src/memory_libero.py` | `VJEPAMemoryBank` for cosine retrieval |
+| `src/models_libero.py` | `DirectMLPVisual`, `ConcatMLPVisual`, `RAIDDecoderVisual` |
+| `src/train_libero.py` | Training loop for all 5 conditions |
+| `src/run_all_libero.py` | Sweep driver |
+| `src/autoresearch_libero.py` | Self-improving architecture search |
+| `program.md` | Full protocol documentation |

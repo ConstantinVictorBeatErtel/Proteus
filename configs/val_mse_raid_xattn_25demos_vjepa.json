@@ -1,0 +1,5 @@
+{
+  "condition": "raid_xattn",
+  "n_demos": 25,
+  "val_mse": 0.5257948120780613
+}

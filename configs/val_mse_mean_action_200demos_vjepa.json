@@ -1,0 +1,5 @@
+{
+  "condition": "mean_action",
+  "n_demos": 200,
+  "val_mse": 1.005855917930603
+}

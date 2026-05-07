@@ -1,0 +1,5 @@
+{
+  "condition": "concat_mlp",
+  "n_demos": 200,
+  "val_mse": 0.554081165509238
+}

@@ -1,0 +1,5 @@
+{
+  "condition": "nn_copy",
+  "n_demos": 200,
+  "val_mse": 0.83336829498141
+}

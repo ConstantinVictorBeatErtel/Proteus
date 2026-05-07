@@ -1,0 +1,5 @@
+{
+  "condition": "direct_mlp",
+  "n_demos": 200,
+  "val_mse": 0.4222427113862633
+}
