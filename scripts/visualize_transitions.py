@@ -3,6 +3,7 @@ import json
 import os
 import random
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -259,37 +260,63 @@ def render_grid(
     output_path: Path,
 ) -> None:
     rows = len(samples)
-    fig = plt.figure(figsize=(13.5, max(2.1 * rows, 4.0)), dpi=160)
-    gs = fig.add_gridspec(rows, 5, width_ratios=[1.0, 1.0, 1.25, 1.25, 1.25], wspace=0.34, hspace=0.72)
+    fig = plt.figure(figsize=(15.5, max(2.55 * rows, 4.2)), dpi=180)
+    gs = fig.add_gridspec(
+        rows,
+        6,
+        width_ratios=[1.52, 1.0, 1.0, 1.24, 1.24, 1.24],
+        wspace=0.36,
+        hspace=0.58,
+    )
 
     all_actions = np.concatenate([raid_actions, direct_actions, gt_actions], axis=0)
     ylim = float(max(1.0, np.nanmax(np.abs(all_actions)) * 1.15))
-    headers = ["current", "GR-1 predicted next", "RAID action", "Direct action", "GT action"]
+    headers = ["sample", "current", "GR-1 predicted next", "RAID action", "Direct action", "GT action"]
 
     for r, sample in enumerate(samples):
-        for c in range(5):
+        for c in range(6):
             ax = fig.add_subplot(gs[r, c])
             if r == 0:
                 ax.set_title(headers[c], fontsize=10, fontweight="bold", pad=8)
             if c == 0:
+                ax.axis("off")
+                wrapped = textwrap.fill(sample.language, width=34)
+                ax.text(
+                    0.0,
+                    0.68,
+                    wrapped,
+                    ha="left",
+                    va="top",
+                    fontsize=8.5,
+                    color="#262626",
+                    linespacing=1.22,
+                    transform=ax.transAxes,
+                )
+                ax.text(
+                    0.0,
+                    0.18,
+                    f"demo {sample.demo_idx}\nstep {sample.step_idx}",
+                    ha="left",
+                    va="top",
+                    fontsize=8.5,
+                    color="#555555",
+                    linespacing=1.28,
+                    transform=ax.transAxes,
+                )
+            elif c == 1:
                 ax.imshow(current_frames[r])
                 ax.axis("off")
-            elif c == 1:
+            elif c == 2:
                 ax.imshow(pred_frames[r])
                 ax.axis("off")
-            elif c == 2:
-                draw_action_bars(ax, raid_actions[r], "raid_visual", ylim)
             elif c == 3:
+                draw_action_bars(ax, raid_actions[r], "raid_visual", ylim)
+            elif c == 4:
                 draw_action_bars(ax, direct_actions[r], "direct_visual", ylim)
             else:
                 draw_action_bars(ax, gt_actions[r], "ground truth", ylim)
 
-        caption = (
-            f"{sample.language}  |  demo {sample.demo_idx}, step {sample.step_idx}"
-        )
-        fig.text(0.012, 1.0 - (r + 0.93) / rows, caption, fontsize=8, color="#303030")
-
-    fig.suptitle("RAID transition samples from cached LIBERO features", fontsize=14, y=0.997)
+    fig.suptitle("RAID transition samples from cached LIBERO features", fontsize=14, y=0.992)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -298,7 +325,7 @@ def render_grid(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_demos", type=int, default=200)
-    parser.add_argument("--n_rows", type=int, default=8)
+    parser.add_argument("--n_rows", type=int, default=4)
     parser.add_argument("--output_dir", default="outputs")
     parser.add_argument("--dataset_dir", default="data/libero_spatial/libero_spatial/libero_spatial")
     parser.add_argument("--feature_dir", default="data/libero_spatial/features")
