@@ -1,17 +1,13 @@
 """
-Full sweep: train and evaluate all 5 conditions × 4 demo scales
-using V-JEPA 2 cached features on LIBERO-Spatial.
+Full sweep: train and evaluate all conditions × all demo scales on LIBERO-Spatial.
 
 Usage:
     python src/run_all_libero.py \
-        --feature_dir /home/ubuntu/RAID/data/libero_spatial/vjepa_features \
+        --feature_dir data/libero_spatial/features \
         --device cuda
 
-Demo scales: 25, 50, 100, 200
-Conditions:  mean_action, nn_copy, direct_mlp, concat_mlp, raid_xattn
-
-All conditions use IDENTICAL frozen V-JEPA 2 features (feat_dim=1024).
-Only the decoder architecture and whether retrieval is used varies.
+Demo scales: 25, 50, 100, 200 (matching original RAID sweep).
+Conditions:  direct_visual, raid_visual
 """
 from __future__ import annotations
 
@@ -22,97 +18,112 @@ import sys
 from pathlib import Path
 
 
-CONDITIONS  = ["mean_action", "nn_copy", "direct_mlp", "concat_mlp", "raid_xattn"]
+CONDITIONS  = ["direct_visual", "raid_visual"]
 DEMO_SCALES = [25, 50, 100, 200]
+
+
+def run_training(condition: str, n_demos: int, feature_dir: str, device: str,
+                 epochs: int = 100) -> float:
+    cmd = [
+        sys.executable, "src/train_libero.py",
+        "--condition",   condition,
+        "--n_demos",     str(n_demos),
+        "--feature_dir", feature_dir,
+        "--epochs",      str(epochs),
+        "--device",      device,
+    ]
+    print(f"\n>>> {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False)
+    if result.returncode != 0:
+        print(f"[WARNING] Training exited with code {result.returncode}")
+
+    # Read best val MSE from saved checkpoint
+    ckpt_path = Path("models") / f"{condition}_{n_demos}demos_libero_best.pt"
+    if ckpt_path.exists():
+        import torch
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        # Re-evaluate to get val MSE
+        return evaluate_checkpoint(condition, n_demos, feature_dir, device)
+    return float("nan")
+
+
+def evaluate_checkpoint(condition: str, n_demos: int, feature_dir: str,
+                         device: str) -> float:
+    """Load best checkpoint and evaluate on validation set."""
+    import torch
+    from torch.utils.data import DataLoader
+    import sys
+    sys.path.insert(0, "src")
+    from models import DirectMLPVisual, RAIDDecoderVisual
+    from train_libero import _load_cached_datasets, populate_memory_from_cache, run_epoch
+
+    feature_dir_p = Path(feature_dir)
+    _, val_ds, feat_dim = _load_cached_datasets(feature_dir_p, n_demos)
+    val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=4)
+
+    ckpt_path = Path("models") / f"{condition}_{n_demos}demos_libero_best.pt"
+    if not ckpt_path.exists():
+        return float("nan")
+
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+
+    if condition == "direct_visual":
+        model = DirectMLPVisual(feat_dim=feat_dim).to(device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        memory_bank = None
+    else:
+        model = RAIDDecoderVisual(feat_dim=feat_dim).to(device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        memory_bank = populate_memory_from_cache(feature_dir_p, n_demos, device,
+                                                  feat_dim=feat_dim)
+
+    val_mse = run_epoch(model, val_loader, None, memory_bank, condition, device)
+    return val_mse
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--feature_dir",
-                   default="/home/ubuntu/RAID/data/libero_spatial/vjepa_features")
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--epochs", type=int, default=100)
-    p.add_argument("--skip_nonparam", action="store_true",
-                   help="skip mean_action and nn_copy (already computed)")
+    p.add_argument("--feature_dir", default="data/libero_spatial/features")
+    p.add_argument("--device",      default="cuda")
+    p.add_argument("--epochs",      type=int, default=100)
     args = p.parse_args()
 
-    py = sys.executable
-    project_root = Path(__file__).resolve().parent.parent
     results = {}
 
-    for nd in DEMO_SCALES:
-        results[str(nd)] = {}
-        for cond in CONDITIONS:
-            if args.skip_nonparam and cond in ("mean_action", "nn_copy"):
-                # Read existing val_mse if available.
-                mse_path = (project_root / "configs" /
-                             f"val_mse_{cond}_{nd}demos_vjepa.json")
-                if mse_path.exists():
-                    d = json.loads(mse_path.read_text())
-                    val_mse = d["val_mse"]
-                else:
-                    val_mse = float("nan")
-            else:
-                cmd = [
-                    py,
-                    str(project_root / "src" / "train_libero.py"),
-                    "--condition", cond,
-                    "--n_demos", str(nd),
-                    "--feature_dir", args.feature_dir,
-                    "--output_dir", str(project_root / "models"),
-                    "--epochs", str(args.epochs),
-                    "--device", args.device,
-                ]
-                print(f"\n[run_all_libero] START {' '.join(cmd)}", flush=True)
-                ret = subprocess.run(cmd, cwd=project_root)
-                if ret.returncode != 0:
-                    print(f"[run_all_libero] WARNING: {cond} @ {nd}d "
-                          f"exited with code {ret.returncode}")
-                    val_mse = float("nan")
-                else:
-                    # Read the saved val_mse.
-                    mse_path = (project_root / "configs" /
-                                 f"val_mse_{cond}_{nd}demos_vjepa.json")
-                    if mse_path.exists():
-                        d = json.loads(mse_path.read_text())
-                        val_mse = d["val_mse"]
-                    else:
-                        val_mse = float("nan")
+    for condition in CONDITIONS:
+        results[condition] = {}
+        for n_demos in DEMO_SCALES:
+            val_mse = run_training(condition, n_demos, args.feature_dir,
+                                   args.device, args.epochs)
+            results[condition][str(n_demos)] = {"val_mse": val_mse}
+            print(f"\n  {condition} @ {n_demos} demos → val_mse={val_mse:.4f}")
 
-            results[str(nd)][cond] = val_mse
-
-    # ---- Print summary table ----
-    print("\n\n=== LIBERO-Spatial Results (V-JEPA 2, feat_dim=1024) ===\n")
-    header = f"{'Condition':<16} {'25':>10} {'50':>10} {'100':>10} {'200':>10}"
+    # Print summary table
+    print("\n\n=== LIBERO-Spatial Offline Results ===")
+    header = f"{'Condition':<22} {'25d':>8} {'50d':>8} {'100d':>8} {'200d':>8}"
     print(header)
     print("-" * len(header))
     for cond in CONDITIONS:
-        vals = [results[str(n)].get(cond, float("nan")) for n in DEMO_SCALES]
-        line = f"{cond:<16}"
-        for v in vals:
-            line += f" {v:>10.4f}" if not (isinstance(v, float) and v != v) else f" {'nan':>10}"
-        print(line)
+        vals = [results[cond].get(str(n), {}).get("val_mse", float("nan"))
+                for n in DEMO_SCALES]
+        print(f"{cond:<22} {vals[0]:>8.4f} {vals[1]:>8.4f} {vals[2]:>8.4f} {vals[3]:>8.4f}")
 
-    # ---- Save results ----
-    out_path = project_root / "configs" / "results_vjepa.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save
+    out_path = Path("configs") / "results_libero.json"
+    out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(json.dumps(results, indent=2))
-    print(f"\n[run_all_libero] Results saved → {out_path}")
+    print(f"\nResults saved to {out_path}")
 
-    # ---- Validation gate ----
-    print(f"\n=== Validation Gate ===")
-    dir_25  = results["25"].get("direct_mlp", float("nan"))
-    raid_25 = results["25"].get("raid_xattn", float("nan"))
-    concat_25 = results["25"].get("concat_mlp", float("nan"))
-    print(f"direct_mlp  @ 25: {dir_25:.4f}")
-    print(f"concat_mlp  @ 25: {concat_25:.4f}")
-    print(f"raid_xattn  @ 25: {raid_25:.4f}")
-
-    if raid_25 <= dir_25 and raid_25 <= concat_25:
-        print("PASSED — raid_xattn ≤ concat_mlp ≤ direct_mlp at low data. "
-              "Retrieval + cross-attention helps.")
+    # Validation gate
+    direct_25  = results.get("direct_visual", {}).get("25", {}).get("val_mse", float("nan"))
+    raid_25    = results.get("raid_visual",   {}).get("25", {}).get("val_mse", float("nan"))
+    print(f"\n=== Stage 1 Validation Gate ===")
+    print(f"direct_visual @ 25 demos: {direct_25:.4f}")
+    print(f"raid_visual   @ 25 demos: {raid_25:.4f}")
+    if raid_25 <= direct_25:
+        print("✓ PASSED — raid_visual ≤ direct_visual. Proceed to Stage 2 (GRPO).")
     else:
-        print("note: expected ranking may not hold — check results.")
+        print("✗ FAILED — raid_visual > direct_visual. Do NOT proceed to GRPO yet.")
 
 
 if __name__ == "__main__":
