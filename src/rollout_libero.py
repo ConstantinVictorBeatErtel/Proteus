@@ -129,7 +129,8 @@ def run_episode(
     deterministic: bool = False,
     k: int = 3,
     max_steps: int = 30,
-) -> tuple[list, float, bool]:
+    capture_frames: bool = False,
+) -> tuple[list, float, bool] | tuple[list, float]:
     """
     Run one episode using LIBERO sim.
 
@@ -151,6 +152,7 @@ def run_episode(
         obs = obs[0]
 
     trajectory = []
+    frames = []
     total_reward = 0.0
     success = False
 
@@ -188,6 +190,8 @@ def run_episode(
 
         result = env.step(action_np)
         obs, env_reward, done, info = result[:4]
+        if capture_frames:
+            frames.append(obs["agentview_rgb"])
 
         # Use dense shaped reward + env reward + success bonus at episode end
         shaped = _shaped_reward(obs)
@@ -217,4 +221,6 @@ def run_episode(
         if done or success:
             break
 
+    if capture_frames:
+        return frames, total_reward
     return trajectory, total_reward, success
