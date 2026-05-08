@@ -1,0 +1,37 @@
+diff --git a/models/__init__.py b/models/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/models/gr1.py b/models/gr1.py
+index ac67cd6..a3b3885 100644
+--- a/models/gr1.py
++++ b/models/gr1.py
+@@ -220,7 +220,7 @@ class GR1(nn.Module):
+             hand_patch_embeddings = self.embed_hand_patch(hand_patch_embeddings.float())  # (b, l, n_patch_latents, h)
+ 
+         # Add timestep embeddings
+-        time_embeddings = self.embed_timestep.weight  # (l, h)
++        time_embeddings = self.embed_timestep.weight[:sequence_length]  # (l, h)
+         lang_embeddings = lang_embeddings.view(batch_size, 1, -1) + time_embeddings
+         state_embeddings = state_embeddings + time_embeddings
+         patch_embeddings = patch_embeddings + time_embeddings.view(sequence_length, 1, self.hidden_size)
+diff --git a/models/trajectory_gpt2.py b/models/trajectory_gpt2.py
+index 2042442..220eb5b 100644
+--- a/models/trajectory_gpt2.py
++++ b/models/trajectory_gpt2.py
+@@ -520,7 +520,7 @@ class GPT2Model(GPT2PreTrainedModel):
+         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+         # self.wpe = nn.Embedding(config.n_positions, config.n_embd)
+         self.drop = nn.Dropout(config.embd_pdrop)
+-        self.h = nn.ModuleList([Block(config.n_ctx, config, scale=True) for _ in range(config.n_layer)])
++        self.h = nn.ModuleList([Block(config.n_positions, config, scale=True) for _ in range(config.n_layer)])
+         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+ 
+         self.init_weights()
+@@ -584,7 +584,6 @@ class GPT2Model(GPT2PreTrainedModel):
+ 
+     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
+     @add_code_sample_docstrings(
+-        tokenizer_class=_TOKENIZER_FOR_DOC,
+         checkpoint="gpt2",
+         output_type=BaseModelOutputWithPastAndCrossAttentions,
+         config_class=_CONFIG_FOR_DOC,

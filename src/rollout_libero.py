@@ -191,7 +191,7 @@ def run_episode(
         result = env.step(action_np)
         obs, env_reward, done, info = result[:4]
         if capture_frames:
-            frames.append(obs["agentview_rgb"])
+            frames.append(_get_frame(obs))
 
         # Use dense shaped reward + env reward + success bonus at episode end
         shaped = _shaped_reward(obs)

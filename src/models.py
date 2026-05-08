@@ -179,6 +179,7 @@ class DirectMLPVisual(nn.Module):
         super().__init__()
         self.feat_dim   = feat_dim
         self.action_dim = action_dim
+        self.log_std = nn.Parameter(torch.full((action_dim,), -1.0))
         self.net = nn.Sequential(
             nn.Linear(feat_dim * 2, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -191,8 +192,10 @@ class DirectMLPVisual(nn.Module):
             nn.Linear(hidden_dim, action_dim),
         )
 
-    def forward(self, feat_t: torch.Tensor, feat_next: torch.Tensor) -> torch.Tensor:
-        return self.net(torch.cat([feat_t, feat_next], dim=-1))
+    def forward(self, feat_t: torch.Tensor, feat_next: torch.Tensor,
+                retrieved=None, **kwargs) -> tuple:
+        pred = self.net(torch.cat([feat_t, feat_next], dim=-1))
+        return pred, None
 
 
 class RAIDDecoderVisual(nn.Module):
