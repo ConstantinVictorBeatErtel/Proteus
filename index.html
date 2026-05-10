@@ -7,102 +7,571 @@
   <style>
     :root {
       color-scheme: light;
-      --background: #f4f7fb;
+      --ink: #111111;
+      --muted: #5f6368;
+      --paper: #f8fafd;
       --surface: #ffffff;
-      --text: #172033;
-      --muted: #5d6b82;
-      --accent: #1f7a8c;
-      --shadow: 0 18px 40px rgba(23, 32, 51, 0.12);
+      --line: #dfe4ea;
+      --blue: #1a73e8;
+      --green: #34a853;
+      --yellow: #fbbc04;
+      --red: #ea4335;
+      --shadow: 0 18px 55px rgba(17, 17, 17, 0.10);
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
-      min-height: 100vh;
-      background: var(--background);
-      color: var(--text);
+      background: var(--paper);
+      color: var(--ink);
       font-family: Arial, Helvetica, sans-serif;
-      line-height: 1.6;
+      line-height: 1.5;
     }
 
-    main {
-      width: min(100% - 32px, 800px);
-      margin: 0 auto;
-      padding: 56px 0;
+    a {
+      color: inherit;
+      text-decoration: none;
     }
 
-    header {
-      margin-bottom: 36px;
-      text-align: center;
-    }
-
-    h1 {
-      margin: 0 0 12px;
-      font-size: 2.4rem;
-      line-height: 1.15;
-    }
-
-    .intro {
-      margin: 0 auto;
-      max-width: 620px;
-      color: var(--muted);
-      font-size: 1.05rem;
-    }
-
-    .video-section {
-      margin: 28px 0;
-      padding: 24px;
-      background: var(--surface);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-    }
-
-    .video-section h2 {
-      margin: 0 0 16px;
-      color: var(--accent);
-      font-size: 1.25rem;
-    }
-
+    img,
     video {
       display: block;
       width: 100%;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 18px clamp(20px, 4vw, 56px);
+      background: rgba(248, 250, 253, 0.88);
+      border-bottom: 1px solid rgba(223, 228, 234, 0.78);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    nav a:hover {
+      color: var(--ink);
+    }
+
+    .hero {
+      min-height: 92vh;
+      display: grid;
+      align-items: end;
+      padding: 88px clamp(20px, 5vw, 72px) 36px;
+      background: #eef4fb;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: clamp(32px, 6vw, 80px);
+      align-items: end;
+      width: min(100%, 1240px);
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 20px;
+      color: var(--blue);
+      font-size: 0.86rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .dots {
+      display: inline-grid;
+      grid-template-columns: repeat(4, 8px);
+      gap: 5px;
+    }
+
+    .dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .dots span:nth-child(1) { background: var(--blue); }
+    .dots span:nth-child(2) { background: var(--red); }
+    .dots span:nth-child(3) { background: var(--yellow); }
+    .dots span:nth-child(4) { background: var(--green); }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(3.2rem, 6.8vw, 6.6rem);
+      font-weight: 500;
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      margin: 28px 0 0;
+      color: #30343b;
+      font-size: clamp(1.15rem, 2vw, 1.55rem);
+    }
+
+    .hero-card {
+      overflow: hidden;
+      border: 1px solid rgba(17, 17, 17, 0.08);
       border-radius: 8px;
-      background: #0f172a;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-card img {
+      aspect-ratio: 2.85 / 1;
+      object-fit: cover;
+      background: #eef2f6;
+    }
+
+    .hero-card p {
+      margin: 0;
+      padding: 18px 20px 22px;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+
+    .section {
+      padding: clamp(64px, 10vw, 120px) clamp(20px, 5vw, 72px);
+    }
+
+    .section-inner {
+      width: min(100%, 1160px);
+      margin: 0 auto;
+    }
+
+    .section-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(300px, 1fr);
+      gap: clamp(24px, 6vw, 72px);
+      align-items: start;
+      margin-bottom: 44px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 4.4rem);
+      font-weight: 500;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 0;
+      color: #30343b;
+      font-size: clamp(1.08rem, 1.7vw, 1.34rem);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--line);
+    }
+
+    .metric {
+      min-height: 170px;
+      padding: 28px;
+      background: var(--surface);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: clamp(2.2rem, 5vw, 4.4rem);
+      font-weight: 500;
+      line-height: 0.92;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+
+    .dark {
+      background: #111111;
+      color: #ffffff;
+    }
+
+    .dark .lead,
+    .dark .caption,
+    .dark .meta {
+      color: rgba(255, 255, 255, 0.68);
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 28px;
+    }
+
+    .video-card {
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      background: #1d1d1f;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+    }
+
+    .video-frame {
+      padding: 12px;
+      background: #000000;
+    }
+
+    video {
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #000000;
+    }
+
+    .video-body {
+      padding: 22px 24px 26px;
+    }
+
+    .video-body h3,
+    .grid-card h3,
+    .figure-card h3 {
+      margin: 0 0 10px;
+      font-size: 1.22rem;
+      font-weight: 600;
     }
 
     .caption {
-      margin: 14px 0 0;
+      margin: 0;
       color: var(--muted);
-      font-size: 0.96rem;
+      font-size: 0.98rem;
+    }
+
+    .story {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+      gap: clamp(28px, 6vw, 76px);
+      align-items: center;
+    }
+
+    .story-copy p {
+      margin: 0 0 20px;
+      color: #30343b;
+      font-size: 1.12rem;
+    }
+
+    .figure-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .figure-card img {
+      background: #ffffff;
+    }
+
+    .figure-card div {
+      padding: 20px 22px 24px;
+    }
+
+    .grid-gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 28px;
+    }
+
+    .grid-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .grid-media {
+      overflow: auto;
+      max-height: 540px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .grid-media img {
+      min-width: 720px;
+    }
+
+    .grid-card div:last-child {
+      padding: 20px 22px 24px;
+    }
+
+    .meta {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .closing {
+      background: #ffffff;
+      border-top: 1px solid var(--line);
+    }
+
+    .closing .section-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 32px;
+      align-items: center;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 20px;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 860px) {
+      .topbar,
+      nav,
+      .hero-inner,
+      .section-heading,
+      .story,
+      .closing .section-inner {
+        display: block;
+      }
+
+      nav {
+        margin-top: 12px;
+      }
+
+      nav a {
+        margin-right: 14px;
+      }
+
+      .hero-card {
+        margin-top: 36px;
+      }
+
+      .metrics,
+      .video-grid,
+      .grid-gallery {
+        grid-template-columns: 1fr;
+      }
+
+      .figure-card {
+        margin-top: 28px;
+      }
+
+      .button {
+        margin-top: 18px;
+      }
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>RAID Robotics Project</h1>
-      <p class="intro">Demonstration videos highlighting robotics testing, perception, and movement results from the RAID project.</p>
-    </header>
+  <header class="topbar">
+    <a class="brand" href="#">RAID Robotics Project</a>
+    <nav aria-label="Page sections">
+      <a href="#results">Results</a>
+      <a href="#videos">Videos</a>
+      <a href="#method">Method</a>
+      <a href="#grids">Transition grids</a>
+    </nav>
+  </header>
 
-    <section class="video-section">
-      <h2>Direct Visual Demonstration</h2>
-      <video controls>
-        <source src="videos/test1.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-      </video>
-      <p class="caption">A direct visual demonstration sequence from the RAID robotics project.</p>
+  <main>
+    <section class="hero">
+      <div class="hero-inner">
+        <div>
+          <p class="eyebrow"><span class="dots" aria-hidden="true"><span></span><span></span><span></span><span></span></span>World models and embodied AI</p>
+          <h1>Retrieval-Augmented Inverse Dynamics for robotic manipulation.</h1>
+          <p class="hero-copy">RAID pairs a GR-1 world-model encoder with a retrieval-augmented action decoder, using remembered demonstrations to infer the motor command behind a dreamed latent transition.</p>
+        </div>
+        <aside class="hero-card">
+          <img src="assets/figures/raid_visual_overview.png" alt="RAID transition samples showing current frames, predicted next frames, and action comparisons">
+          <p>Qualitative transition samples from cached LIBERO features, comparing RAID predictions with direct visual predictions and ground truth actions.</p>
+        </aside>
+      </div>
     </section>
 
-    <section class="video-section">
-      <h2>RAID Visual Demonstration</h2>
-      <video controls>
-        <source src="videos/test2.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-      </video>
-      <p class="caption">A RAID visual demonstration showing project behavior and results.</p>
+    <section class="section" id="results">
+      <div class="section-inner">
+        <div class="section-heading">
+          <h2>Retrieval gives the inverse-dynamics head a sharper action prior.</h2>
+          <p class="lead">On LIBERO-Spatial with 25 demonstrations, cross-attention RAID over GR-1 features reaches 0.132 validation MSE versus 0.842 for the same visual head without retrieval.</p>
+        </div>
+        <div class="metrics" aria-label="Project result metrics">
+          <div class="metric">
+            <strong>6.4x</strong>
+            <span>Validation-MSE improvement at 25 demonstrations.</span>
+          </div>
+          <div class="metric">
+            <strong>0.132</strong>
+            <span>RAID visual validation MSE in the lowest-data setting.</span>
+          </div>
+          <div class="metric">
+            <strong>k = 3</strong>
+            <span>Retrieved demonstrator actions used by the cross-attention prior.</span>
+          </div>
+          <div class="metric">
+            <strong>7-DOF</strong>
+            <span>Action vector decoded for LIBERO pick-and-place manipulation.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section dark" id="videos">
+      <div class="section-inner">
+        <div class="section-heading">
+          <h2>Video demonstrations</h2>
+          <p class="lead">The demonstrations have been rotated 180 degrees at the video file level so playback appears upright while the browser controls remain readable.</p>
+        </div>
+        <div class="video-grid">
+          <article class="video-card">
+            <div class="video-frame">
+              <video controls preload="metadata" poster="assets/posters/direct_visual_poster.jpg">
+                <source src="videos/test1.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div class="video-body">
+              <h3>Direct visual baseline</h3>
+              <p class="caption">A representative direct visual demonstration sequence for the RAID comparison.</p>
+            </div>
+          </article>
+
+          <article class="video-card">
+            <div class="video-frame">
+              <video controls preload="metadata" poster="assets/posters/raid_visual_poster.jpg">
+                <source src="videos/test2.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div class="video-body">
+              <h3>RAID visual policy</h3>
+              <p class="caption">A representative RAID visual demonstration showing the retrieval-augmented policy behavior.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="method">
+      <div class="section-inner story">
+        <div class="story-copy">
+          <p class="eyebrow"><span class="dots" aria-hidden="true"><span></span><span></span><span></span><span></span></span>Method</p>
+          <h2>Dream the next state, then retrieve the action that likely caused it.</h2>
+          <p>GR-1 supplies a one-step-ahead dreamed feature. RAID maps the current and dreamed feature pair to a 7-DOF action by blending a direct MLP trunk with a cross-attention prior over similar demonstrated transitions.</p>
+          <p>The result is a compositional policy: the world model handles latent future prediction, while retrieval supplies concrete action templates from the demonstration memory bank.</p>
+        </div>
+        <figure class="figure-card">
+          <img src="assets/figures/robotics_perturbation.png" alt="Robotics perturbation visualization">
+          <div>
+            <h3>Robustness probe</h3>
+            <p class="caption">A project visualization used to inspect robotic behavior under perturbation and transition uncertainty.</p>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="grids">
+      <div class="section-inner">
+        <div class="section-heading">
+          <h2>Rotated transition grids</h2>
+          <p class="lead">Four compact qualitative grids from the report appendix. The visual observation cells have been rotated 180 degrees while the labels and action charts remain readable.</p>
+        </div>
+
+        <div class="grid-gallery">
+          <article class="grid-card">
+            <div class="grid-media">
+              <img src="assets/grids/transition_grid_compact_seed0_visuals_rotated.png" alt="RAID transition grid for seed 0 with visual observation cells rotated upright">
+            </div>
+            <div>
+              <h3>Seed 0</h3>
+              <p class="caption">Current frame, GR-1 predicted next frame, RAID action, direct visual action, and ground truth action comparisons.</p>
+              <p class="meta">Observation cells rotated 180 degrees.</p>
+            </div>
+          </article>
+
+          <article class="grid-card">
+            <div class="grid-media">
+              <img src="assets/grids/transition_grid_compact_seed1_visuals_rotated.png" alt="RAID transition grid for seed 1 with visual observation cells rotated upright">
+            </div>
+            <div>
+              <h3>Seed 1</h3>
+              <p class="caption">Qualitative transition samples from the 200-demo LIBERO-Spatial setting.</p>
+              <p class="meta">Observation cells rotated 180 degrees.</p>
+            </div>
+          </article>
+
+          <article class="grid-card">
+            <div class="grid-media">
+              <img src="assets/grids/transition_grid_compact_seed2_visuals_rotated.png" alt="RAID transition grid for seed 2 with visual observation cells rotated upright">
+            </div>
+            <div>
+              <h3>Seed 2</h3>
+              <p class="caption">RAID predictions are compared with the direct baseline across sampled transitions.</p>
+              <p class="meta">Observation cells rotated 180 degrees.</p>
+            </div>
+          </article>
+
+          <article class="grid-card">
+            <div class="grid-media">
+              <img src="assets/grids/transition_grid_compact_seed3_visuals_rotated.png" alt="RAID transition grid for seed 3 with visual observation cells rotated upright">
+            </div>
+            <div>
+              <h3>Seed 3</h3>
+              <p class="caption">A final compact grid showing the sign and relative magnitude of predicted actions.</p>
+              <p class="meta">Observation cells rotated 180 degrees.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section closing">
+      <div class="section-inner">
+        <div>
+          <p class="eyebrow"><span class="dots" aria-hidden="true"><span></span><span></span><span></span><span></span></span>Supplementary site</p>
+          <h2>RAID is a memory-augmented bridge between dreamed states and robot actions.</h2>
+        </div>
+        <a class="button" href="https://github.com/ConstantinVictorBeatErtel/RAID">View repository</a>
+      </div>
     </section>
   </main>
 </body>
