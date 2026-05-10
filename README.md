@@ -18,9 +18,9 @@ In contact-rich manipulation, the mapping from RGB frames to correct motor comma
 
 ```
 frame_t  ──►  GR-1.encode_frames()       ──►  feat_t    (384-dim, frozen MAE + embed_img)
-frame_t  ──►  GR-1.predict_next_feat()   ──►  feat_next (384-dim, GR-1 forward-prediction head)
+frame_t  ──►  GR-1.predict_next_feat()   ──►  feat_next (384-dim, GR-1 predicted next-frame feature)
 
-Memory bank: retrieve top-k actions by cosine similarity on feat_t
+Memory bank: retrieve top-k actions by cosine similarity on (feat_t, feat_next)
 
 (feat_t, feat_next, [a_1, …, a_k])  ──►  RAIDDecoderVisual (cross-attention)  ──►  action_norm
 action_norm  ──►  denormalise  ──►  7-DOF end-effector command
@@ -33,7 +33,7 @@ action_norm  ──►  denormalise  ──►  7-DOF end-effector command
 | Condition | Model | Retrieval |
 |-----------|-------|-----------|
 | `direct_visual` | 3-layer MLP on (feat_t, feat_next) | No |
-| `raid_visual` | Cross-attention decoder | Yes (k=5) |
+| `raid_visual` | Cross-attention decoder | Yes (k=3 in the final visual runs) |
 
 ---
 
@@ -43,10 +43,10 @@ action_norm  ──►  denormalise  ──►  7-DOF end-effector command
 
 | Demo scale | `direct_visual` | `raid_visual` | Improvement |
 |------------|----------------|---------------|-------------|
-| 25 demos | 0.842 | **0.132** | **6.4×** |
-| 50 demos | 0.637 | **0.154** | 4.1× |
-| 100 demos | 0.570 | **0.169** | 3.4× |
-| 200 demos | 0.552 | **0.171** | 3.2× |
+| 25 demos | 0.852 | **0.131** | **6.5×** |
+| 50 demos | 0.639 | **0.158** | 4.0× |
+| 100 demos | 0.580 | **0.171** | 3.4× |
+| 200 demos | 0.554 | **0.174** | 3.2× |
 
 Retrieval-augmented cross-attention provides a **6× MSE reduction** at the lowest data regime (25 demos), demonstrating strong sample efficiency from retrieval as a prior.
 
@@ -54,13 +54,17 @@ Retrieval-augmented cross-attention provides a **6× MSE reduction** at the lowe
 
 | Metric | Value |
 |--------|-------|
-| Updates completed | 86 / 100 |
-| Starting mean reward | −3.881 |
-| Best mean reward | −3.153 (update 59) |
-| Improvement | +18.8% |
-| Success rate | 0.00 |
+| Full run | 382 updates logged |
+| Polish run | 195 updates logged |
+| Best success rate | **0.25** |
+| Best mean reward | **1.226** (polish update 158) |
+| Final checkpoint | `raid_grpo_final/raid_visual_grpo_polish_best_20260509_005631.pt` |
 
-The policy learned to move the end-effector closer to the target (shaped reach reward improved 18.8%), but **never completed the task** (SR = 0). Root cause: osmesa CPU rendering limits episodes to 30 steps due to ~337 ms/step overhead; pick-and-place requires ~80–150 steps to complete.
+The final GRPO run produced intermittent task completions (best SR = 25% over
+4 rollout samples) and moved mean reward from strongly negative shaped rewards
+to positive reward spikes. It is not a solved policy yet: success is sparse and
+unstable, but the online stage is now demonstrably capable of finding successful
+rollouts under EGL.
 
 ---
 
@@ -70,14 +74,20 @@ The policy learned to move the end-effector closer to the target (shaped reach r
 |------|------|
 | `src/gr1_encoder.py` | Frozen GR-1 encoder — `encode_frames()` and `predict_next_feat()` |
 | `src/data_libero.py` | LIBERO HDF5 loader; normalisation; train/val split by demo |
-| `src/memory_libero.py` | `RAIDMemoryBankLibero` — cosine-similarity top-k retrieval |
-| `src/models_libero.py` | `DirectMLPVisual` and `RAIDDecoderVisual` (cross-attention) |
+| `src/memory.py` | `RAIDMemoryBank` — cosine-similarity top-k retrieval over `(feat_t, feat_next)` |
+| `src/memory_libero.py` | Earlier LIBERO/V-JEPA memory-bank implementation retained for reference |
+| `src/models.py` | Active `DirectMLPVisual` and `RAIDDecoderVisual` implementations |
+| `src/models_libero.py` | Earlier visual model definitions retained for reference/autoresearch |
 | `src/train_libero.py` | Training loop for `direct_visual` and `raid_visual` |
 | `src/run_all_libero.py` | Sweep driver: all conditions × all demo scales |
 | `src/rollout_libero.py` | LIBERO environment rollout with GR-1 + RAID inference |
 | `src/grpo_libero.py` | GRPO online fine-tuning loop |
 | `src/cache_gr1_features.py` | Pre-compute and cache GR-1 features for the dataset |
 | `configs/` | Per-scale norm stats, loss curves, sweep results |
+| `scripts/compare_video.py` | Generate side-by-side rollout videos for RAID vs direct visual policies |
+| `scripts/visualize_transitions.py` | Render static transition grids with frames, GR-1 predictions, and action bars |
+| `raid_grpo_final/` | Final GRPO logs, plots, scripts, and best checkpoints from the Lambda run |
+| `GRPO_FINAL_RUN.md` | Narrative record of the final Lambda run and preserved artifacts |
 | `STATUS.md` | Full session-by-session diagnosis and continuity notes |
 
 ---
@@ -102,10 +112,24 @@ python src/run_all_libero.py \
 **Step 3 — GRPO online fine-tuning:**
 ```bash
 python src/grpo_libero.py \
+    --n_demos 200 \
     --feature_dir data/libero_spatial/features \
-    --model_path  models/raid_visual_50demos_best.pt \
+    --dataset_dir data/libero_spatial/libero_spatial/libero_spatial \
     --device cuda
 ```
+
+The preserved final Lambda script can also be run from the artifact bundle:
+
+```bash
+MUJOCO_GL=egl python raid_grpo_final/grpo_libero_remote_final.py \
+    --n_demos 200 \
+    --n_updates 300 \
+    --G 4 \
+    --checkpoint_path models/raid_visual_grpo_best.pt \
+    --log_path configs/grpo_libero_log.json
+```
+
+See `GRPO_FINAL_RUN.md` for the final run summary and artifact inventory.
 
 ---
 
@@ -114,8 +138,8 @@ python src/grpo_libero.py \
 | Item | Value |
 |------|-------|
 | GR-1 feature dim | 384 |
-| Retrieval k | 5 |
-| Cross-attention heads | 4 |
+| Retrieval k | 3 |
+| Cross-attention projection dim | 64 |
 | Optimizer | AdamW, lr=1e-3, wd=1e-4 |
 | Epochs | 100 |
 | Batch size | 256 |

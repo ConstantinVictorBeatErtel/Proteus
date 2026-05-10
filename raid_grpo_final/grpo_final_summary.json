@@ -1,0 +1,45 @@
+{
+  "stopped_at_update": 194,
+  "num_updates_logged": 195,
+  "best_sr": 0.25,
+  "best_reward_entry": {
+    "update": 158,
+    "success_rate": 0.25,
+    "mean_reward": 1.226379632949829,
+    "reward_std": 5.941641330718994,
+    "loss": -0.17861878871917725
+  },
+  "success_entries": [
+    {
+      "update": 16,
+      "success_rate": 0.25,
+      "mean_reward": 0.8188868761062622,
+      "reward_std": 5.856021404266357,
+      "loss": -0.316137433052063
+    },
+    {
+      "update": 158,
+      "success_rate": 0.25,
+      "mean_reward": 1.226379632949829,
+      "reward_std": 5.941641330718994,
+      "loss": -0.17861878871917725
+    },
+    {
+      "update": 160,
+      "success_rate": 0.25,
+      "mean_reward": 0.767712414264679,
+      "reward_std": 5.145946979522705,
+      "loss": -0.17517906427383423
+    }
+  ],
+  "last_entry": {
+    "update": 194,
+    "success_rate": 0.0,
+    "mean_reward": -1.9398369789123535,
+    "reward_std": 0.5472345948219299,
+    "loss": -0.023396790027618408
+  },
+  "last_25_mean_reward": -2.5066788482666014,
+  "last_25_mean_sr": 0.0,
+  "checkpoint": "raid_visual_grpo_polish_best_20260509_005631.pt"
+}

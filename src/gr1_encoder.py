@@ -42,6 +42,8 @@ if _gr1_added:
 _src_idx = next((i for i, p in enumerate(sys.path) if p.endswith("/src") or p == "src"), None)
 
 # 4. Import GR-1 modules
+sys.modules.pop("models", None)
+sys.modules.pop("models.vision_transformer", None)
 import models.vision_transformer as vits   # GR-1's ViT
 from models.gr1 import GR1                 # GR-1 model class
 

@@ -6,9 +6,8 @@ Key difference from rollout.py (RoboMimic):
   - GR-1 predicts next-frame features (predict_next_feat) = no (s_t, s_t) proxy hack
   - Memory bank keyed on GR-1 visual features, not low-dim state
 
-Speed note: osmesa (CPU) rendering takes ~337ms/step on this A10 instance.
-Set max_steps=30 for GRPO (30 × 337ms × G=4 ≈ 40s/update).
-With EGL (GPU rendering) this would be ~5ms/step — upgrade when available.
+Speed note: EGL (GPU) rendering takes ~5ms/step on A100.
+max_steps=150 gives full episode horizon for pick-and-place.
 
 Inference flow per step:
     frame_t  →  GR-1.encode_frames  →  feat_t          (384-dim)
@@ -17,6 +16,12 @@ Inference flow per step:
     action_norm  →  denormalise  →  LIBERO sim step
 """
 from __future__ import annotations
+
+# Must set before any mujoco/robosuite import so EGL context picks them up.
+import os
+os.environ["MUJOCO_GL"] = "egl"
+os.environ["PYOPENGL_PLATFORM"] = "egl"
+os.environ["EGL_DEVICE_ID"] = "0"
 
 import sys
 from pathlib import Path
@@ -59,7 +64,8 @@ def _shaped_reward(obs: dict, prev_obs: dict | None = None) -> float:
     for key in ("akita_black_bowl_1_to_robot0_eef_pos",
                 "bowl_to_robot0_eef_pos",):
         if key in obs:
-            dist = float(np.linalg.norm(obs[key]))
+            vec = np.asarray(obs[key], dtype=np.float32).ravel()
+            dist = float(np.linalg.norm(vec[:3]))
             reward += -0.5 * dist   # shaped reach reward
             break
 
@@ -67,7 +73,10 @@ def _shaped_reward(obs: dict, prev_obs: dict | None = None) -> float:
     for key in ("akita_black_bowl_1_pos", "bowl_pos"):
         if key in obs:
             bowl_z = float(np.asarray(obs[key])[2])
-            if bowl_z > 0.9:   # lifted off table
+            prev_z = None
+            if prev_obs is not None and key in prev_obs:
+                prev_z = float(np.asarray(prev_obs[key])[2])
+            if bowl_z > 0.9 and (prev_z is None or prev_z <= 0.9):
                 reward += 0.5
             break
 
@@ -111,6 +120,9 @@ def make_libero_env(task_idx: int = 0):
         "bddl_file_name": bddl,
         "camera_heights": 128,
         "camera_widths":  128,
+        "camera_names": ["agentview"],
+        "render_gpu_device_id": 0,
+        "control_freq": 50,
     }), Path(bddl).stem
 
 
@@ -128,14 +140,13 @@ def run_episode(
     device: str | torch.device = "cuda",
     deterministic: bool = False,
     k: int = 3,
-    max_steps: int = 30,
-    capture_frames: bool = False,
-) -> tuple[list, float, bool] | tuple[list, float]:
+    max_steps: int = 150,
+) -> tuple[list, float, bool]:
     """
     Run one episode using LIBERO sim.
 
-    max_steps=30 by default to limit osmesa rendering overhead (~337ms/step).
-    Increase if using EGL/GPU rendering.
+    max_steps=150 by default for full pick-and-place episodes.
+    With EGL this is ~5ms/step on A100 — no need to shorten.
 
     Returns:
         trajectory: list of (feat_t, feat_next_pred, retrieved, action_taken)
@@ -152,7 +163,6 @@ def run_episode(
         obs = obs[0]
 
     trajectory = []
-    frames = []
     total_reward = 0.0
     success = False
 
@@ -161,8 +171,10 @@ def run_episode(
 
     env_horizon = getattr(env, "horizon", 500)
     n_steps = min(max_steps, env_horizon)
+    reward_scale = 30.0 / float(max(n_steps, 1))
 
     for _step in range(n_steps):
+        prev_obs = obs
         with torch.no_grad():
             img_t  = torch.from_numpy(frame_t).unsqueeze(0)          # (1, H, W, 3)
             feat_t = encoder.encode_frames(img_t)                     # (1, 384)
@@ -190,13 +202,11 @@ def run_episode(
 
         result = env.step(action_np)
         obs, env_reward, done, info = result[:4]
-        if capture_frames:
-            frames.append(_get_frame(obs))
 
         # Use dense shaped reward + env reward + success bonus at episode end
-        shaped = _shaped_reward(obs)
+        shaped = _shaped_reward(obs, prev_obs=prev_obs)
         reward = shaped + float(env_reward)
-        total_reward += reward
+        total_reward += reward * reward_scale
 
         if hasattr(env, "check_success"):
             try:
@@ -221,6 +231,4 @@ def run_episode(
         if done or success:
             break
 
-    if capture_frames:
-        return frames, total_reward
     return trajectory, total_reward, success

@@ -1,7 +1,41 @@
 # RAID + GR-1 + LIBERO: Project Status
 
-**Last updated:** 2026-05-05 (Session 2 complete)  
+**Last updated:** 2026-05-10 (final Lambda GRPO artifacts preserved)  
 **Continuity file** — read this if picking up this project in a new context window.
+
+---
+
+## Latest Update: Final Lambda Run
+
+The older sections below are retained as historical diagnosis. The final Lambda
+session resolved the biggest infrastructure blocker by running LIBERO with EGL,
+preserved the source changes in the repo, and saved the final GRPO artifact
+bundle under `raid_grpo_final/`.
+
+Current source of truth:
+
+| Item | Status |
+|------|--------|
+| Offline BC sweep | Re-run successfully on cached GR-1 features |
+| Best BC condition | `raid_visual` at every demo scale |
+| Final GRPO full run | 382 updates logged |
+| Final GRPO polish run | 195 updates logged |
+| Best observed SR | **0.25** |
+| Best observed mean reward | **1.226** at polish update 158 |
+| Recommended checkpoint | `raid_grpo_final/raid_visual_grpo_polish_best_20260509_005631.pt` |
+
+Fresh BC validation MSE:
+
+| Condition | 25 demos | 50 demos | 100 demos | 200 demos |
+|-----------|----------|----------|-----------|-----------|
+| `direct_visual` | 0.852 | 0.639 | 0.580 | 0.554 |
+| `raid_visual` | **0.131** | **0.158** | **0.171** | **0.174** |
+
+Interpretation: RAID's retrieval-augmented visual decoder is still clearly
+better than direct imitation offline. GRPO is no longer purely a shaped-reward
+reach improvement: it found intermittent successful rollouts, but the policy is
+not robustly solved yet. See `GRPO_FINAL_RUN.md` for the artifact inventory and
+the final run narrative.
 
 ---
 
