@@ -1,0 +1,99 @@
+/usr/lib/python3/dist-packages/scipy/__init__.py:146: UserWarning: A NumPy version >=1.17.3 and <1.25.0 is required for this version of SciPy (detected version 1.26.4
+  warnings.warn(f"A NumPy version >={np_minversion} and <{np_maxversion}"
+Loaded norm stats from data/libero_spatial/libero_spatial/libero_spatial/norm_stats.pt
+Loading GR-1 encoder ...
+[GR1Encoder] Missing keys (452): ['model_clip.positional_embedding', 'model_clip.text_projection', 'model_clip.logit_scale', 'model_clip.visual.class_embedding', 'model_clip.visual.positional_embedding']...
+  feat_dim=384
+Loaded BC policy from models/raid_visual_200demos_libero_best.pt
+Populating memory bank ...
+  Memory bank: 24733 entries
+Task: pick up the black bowl between the plate and the ramekin and place it on the plate
+Making LIBERO env ...
+  BDDL: pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate.bddl
+[1m[33m[robosuite WARNING] [0mNo private macro file found! (__init__.py:7)
+[1m[33m[robosuite WARNING] [0mIt is recommended to use a private macro file (__init__.py:8)
+[1m[33m[robosuite WARNING] [0mTo setup, run: python /home/ubuntu/.local/lib/python3.10/site-packages/robosuite/scripts/setup_macros.py (__init__.py:9)
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+  LIBERO env ready
+Starting GRPO: 500 updates × G=4 rollouts each
+update    0 | SR=0.00 | r=-4.63 | loss=0.086
+update    5 | SR=0.00 | r=-4.61 | loss=0.017
+update   10 | SR=0.00 | r=-4.50 | loss=0.141
+update   15 | SR=0.00 | r=-4.51 | loss=0.123
+update   20 | SR=0.00 | r=-4.52 | loss=-0.136
+update   25 | SR=0.00 | r=-4.21 | loss=0.201
+update   30 | SR=0.00 | r=-4.13 | loss=0.054
+update   35 | SR=0.00 | r=-4.12 | loss=0.220
+update   40 | SR=0.00 | r=-4.14 | loss=0.459
+update   45 | SR=0.00 | r=-4.58 | loss=-0.158
+update   50 | SR=0.00 | r=-3.81 | loss=-0.266
+update   55 | SR=0.00 | r=-3.73 | loss=0.290
+update   60 | SR=0.00 | r=-3.81 | loss=0.252
+update   65 | SR=0.00 | r=-3.91 | loss=0.619
+update   70 | SR=0.00 | r=-3.71 | loss=0.290
+update   75 | SR=0.00 | r=-3.64 | loss=0.264
+update   80 | SR=0.00 | r=-3.74 | loss=-0.603
+update   85 | SR=0.00 | r=-3.68 | loss=-0.266
+update   90 | SR=0.00 | r=-3.51 | loss=-0.730
+update   95 | SR=0.00 | r=-3.45 | loss=-1.123
+update  100 | SR=0.00 | r=-3.65 | loss=-0.586
+update  105 | SR=0.00 | r=-3.30 | loss=0.460
+update  110 | SR=0.00 | r=-3.19 | loss=0.154
+update  115 | SR=0.00 | r=-3.24 | loss=0.111
+update  120 | SR=0.00 | r=-3.13 | loss=0.162
+update  125 | SR=0.00 | r=-3.40 | loss=0.082
+update  130 | SR=0.00 | r=-3.15 | loss=-0.028
+update  135 | SR=0.00 | r=-2.54 | loss=0.545
+update  140 | SR=0.00 | r=-2.84 | loss=0.152
+  ✓ New best SR=0.25 — checkpoint saved
+update  145 | SR=0.00 | r=-2.21 | loss=-0.295
+update  150 | SR=0.00 | r=-2.27 | loss=-0.253
+update  155 | SR=0.00 | r=-2.33 | loss=0.632
+update  160 | SR=0.00 | r=-2.01 | loss=-0.591
+update  165 | SR=0.00 | r=-2.39 | loss=0.039
+update  170 | SR=0.00 | r=-3.13 | loss=-0.640
+update  175 | SR=0.00 | r=-1.97 | loss=0.709
+update  180 | SR=0.00 | r=-1.93 | loss=0.564
+update  185 | SR=0.00 | r=-1.69 | loss=0.277
+update  190 | SR=0.00 | r=-8.52 | loss=-0.105
+update  195 | SR=0.00 | r=-1.68 | loss=-0.118
+update  200 | SR=0.00 | r=-2.00 | loss=0.693
+update  205 | SR=0.00 | r=-2.24 | loss=-1.225
+update  210 | SR=0.00 | r=-2.47 | loss=-0.250
+update  215 | SR=0.00 | r=-2.52 | loss=-0.011
+update  220 | SR=0.00 | r=-1.52 | loss=0.209
+update  225 | SR=0.00 | r=-1.69 | loss=-0.404
+update  230 | SR=0.00 | r=-1.52 | loss=-0.963
+update  235 | SR=0.00 | r=-7.49 | loss=0.505
+update  240 | SR=0.00 | r=-1.39 | loss=-0.114
+update  245 | SR=0.00 | r=-1.37 | loss=-0.369
+update  250 | SR=0.00 | r=-1.59 | loss=0.015
+update  255 | SR=0.00 | r=-1.59 | loss=-0.022
+update  260 | SR=0.00 | r=-1.42 | loss=0.307
+update  265 | SR=0.00 | r=-1.58 | loss=-0.718
+update  270 | SR=0.00 | r=-2.02 | loss=-0.379
+update  275 | SR=0.00 | r=-1.30 | loss=0.398
+update  280 | SR=0.00 | r=-1.20 | loss=0.016
+update  285 | SR=0.00 | r=-1.53 | loss=0.333
+update  290 | SR=0.00 | r=-1.39 | loss=1.051
+update  295 | SR=0.00 | r=-1.83 | loss=-0.183
+update  300 | SR=0.00 | r=-2.03 | loss=1.346
+update  305 | SR=0.00 | r=-2.16 | loss=-0.773
+update  310 | SR=0.00 | r=-5.87 | loss=-0.087
+update  315 | SR=0.00 | r=-2.10 | loss=0.757
+update  320 | SR=0.00 | r=-1.97 | loss=-1.071
+update  325 | SR=0.00 | r=-1.98 | loss=-0.010
+update  330 | SR=0.00 | r=-2.34 | loss=0.050
+update  335 | SR=0.00 | r=-7.10 | loss=-0.792
+update  340 | SR=0.00 | r=-2.03 | loss=-0.551
+update  345 | SR=0.00 | r=-1.66 | loss=-0.047
+update  350 | SR=0.00 | r=-1.65 | loss=-1.254
+update  355 | SR=0.00 | r=-1.51 | loss=0.153
+update  360 | SR=0.00 | r=-1.88 | loss=1.025
+update  365 | SR=0.00 | r=-2.05 | loss=0.082
+update  370 | SR=0.00 | r=-1.65 | loss=0.866
+update  375 | SR=0.00 | r=-2.06 | loss=-1.151
+update  380 | SR=0.00 | r=-2.02 | loss=-0.029

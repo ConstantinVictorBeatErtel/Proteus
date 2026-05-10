@@ -54,13 +54,17 @@ Retrieval-augmented cross-attention provides a **6× MSE reduction** at the lowe
 
 | Metric | Value |
 |--------|-------|
-| Updates completed | 86 / 100 |
-| Starting mean reward | −3.881 |
-| Best mean reward | −3.153 (update 59) |
-| Improvement | +18.8% |
-| Success rate | 0.00 |
+| Full run | 382 updates logged |
+| Polish run | 195 updates logged |
+| Best success rate | **0.25** |
+| Best mean reward | **1.226** (polish update 158) |
+| Final checkpoint | `raid_grpo_final/raid_visual_grpo_polish_best_20260509_005631.pt` |
 
-The policy learned to move the end-effector closer to the target (shaped reach reward improved 18.8%), but **never completed the task** (SR = 0). Root cause: osmesa CPU rendering limits episodes to 30 steps due to ~337 ms/step overhead; pick-and-place requires ~80–150 steps to complete.
+The final GRPO run produced intermittent task completions (best SR = 25% over
+4 rollout samples) and moved mean reward from strongly negative shaped rewards
+to positive reward spikes. It is not a solved policy yet: success is sparse and
+unstable, but the online stage is now demonstrably capable of finding successful
+rollouts under EGL.
 
 ---
 
@@ -78,6 +82,10 @@ The policy learned to move the end-effector closer to the target (shaped reach r
 | `src/grpo_libero.py` | GRPO online fine-tuning loop |
 | `src/cache_gr1_features.py` | Pre-compute and cache GR-1 features for the dataset |
 | `configs/` | Per-scale norm stats, loss curves, sweep results |
+| `scripts/compare_video.py` | Generate side-by-side rollout videos for RAID vs direct visual policies |
+| `scripts/visualize_transitions.py` | Render static transition grids with frames, GR-1 predictions, and action bars |
+| `raid_grpo_final/` | Final GRPO logs, plots, scripts, and best checkpoints from the Lambda run |
+| `GRPO_FINAL_RUN.md` | Narrative record of the final Lambda run and preserved artifacts |
 | `STATUS.md` | Full session-by-session diagnosis and continuity notes |
 
 ---
@@ -106,6 +114,14 @@ python src/grpo_libero.py \
     --model_path  models/raid_visual_50demos_best.pt \
     --device cuda
 ```
+
+The preserved final Lambda script can also be run from the artifact bundle:
+
+```bash
+MUJOCO_GL=egl python raid_grpo_final/grpo_libero_remote_final.py
+```
+
+See `GRPO_FINAL_RUN.md` for the final run summary and artifact inventory.
 
 ---
 
