@@ -1,0 +1,288 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">
+  <defs>
+    <!-- Fonts -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap');
+      text { font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif; }
+      .title { font-size: 28px; font-weight: 600; fill: #f8f9fa; letter-spacing: 0.5px; }
+      .subtitle { font-size: 11px; font-weight: 400; fill: #adb5bd; }
+      .box-title { font-size: 13px; font-weight: 600; }
+      .box-text { font-size: 10.5px; font-weight: 400; }
+      .badge-text { font-size: 10px; font-weight: 700; }
+      .dim-label { font-size: 9px; font-weight: 500; fill: #868e96; }
+      .feature-label { font-size: 12px; font-weight: 600; }
+      .container-label { font-size: 15px; font-weight: 600; fill: #e9ecef; letter-spacing: 0.3px; }
+      .arrow-label { font-size: 9.5px; font-weight: 500; fill: #adb5bd; }
+      .output-dim { font-size: 10px; font-weight: 500; fill: #d3f9d8; }
+    </style>
+
+    <!-- Glow Filters -->
+    <filter id="glow-blue" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#4dabf7" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-purple" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#9775fa" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#51cf66" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-orange" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#ff922b" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-white" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feFlood flood-color="#ffffff" flood-opacity="0.15" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Box Gradients -->
+    <linearGradient id="grad-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4dabf7" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#4dabf7" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <linearGradient id="grad-purple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9775fa" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#9775fa" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <linearGradient id="grad-green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#51cf66" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#51cf66" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <linearGradient id="grad-orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff922b" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ff922b" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <linearGradient id="grad-white" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+
+    <!-- Arrow Markers -->
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#4dabf7"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#9775fa"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#51cf66"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#ff922b"/>
+    </marker>
+    <marker id="arrow-white" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#ced4da"/>
+    </marker>
+    <marker id="arrow-dashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#868e96"/>
+    </marker>
+
+    <!-- Background Radial Glow -->
+    <radialGradient id="bg-glow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#1a1b2e" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#0f1018" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0a0a0a" stop-opacity="1"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1600" height="900" fill="#0a0a0a"/>
+  <rect width="1600" height="900" fill="url(#bg-glow)"/>
+
+  <!-- Decorative ambient orbs -->
+  <ellipse cx="500" cy="450" rx="350" ry="200" fill="#4dabf7" opacity="0.03" filter="url(#glow-blue)"/>
+  <ellipse cx="1250" cy="450" rx="300" ry="220" fill="#9775fa" opacity="0.03" filter="url(#glow-purple)"/>
+
+  <!-- Title -->
+  <text x="800" y="55" text-anchor="middle" class="title" filter="url(#glow-white)">RAID Architecture</text>
+  <line x1="720" y1="70" x2="880" y2="70" stroke="url(#grad-blue)" stroke-width="2" opacity="0.6"/>
+  <text x="800" y="88" text-anchor="middle" class="subtitle" font-size="12px" fill="#868e96">Retrieval-Augmented Inverse Dynamics</text>
+
+  <!-- ============================= LEFT SECTION ============================= -->
+  <!-- Current Frame RGB -->
+  <rect x="70" y="425" width="150" height="65" rx="14" fill="url(#grad-white)" stroke="#ced4da" stroke-width="1.2" filter="url(#glow-white)"/>
+  <text x="145" y="455" text-anchor="middle" class="box-title" fill="#f8f9fa">Current Frame RGB</text>
+  <text x="145" y="472" text-anchor="middle" class="box-text" fill="#adb5bd">Input image Iₜ</text>
+
+  <!-- Arrow: RGB → GR-1 ViT -->
+  <line x1="220" y1="457" x2="270" y2="457" stroke="#ced4da" stroke-width="1.5" marker-end="url(#arrow-white)"/>
+
+  <!-- GR-1 Vision Transformer -->
+  <rect x="270" y="400" width="165" height="115" rx="16" fill="url(#grad-blue)" stroke="#4dabf7" stroke-width="1.5" filter="url(#glow-blue)"/>
+  <text x="352" y="430" text-anchor="middle" class="box-title" fill="#4dabf7">GR-1 Vision Transformer</text>
+  <text x="352" y="450" text-anchor="middle" class="box-text" fill="#a5d8ff">frozen weights</text>
+  <text x="352" y="465" text-anchor="middle" class="box-text" fill="#a5d8ff">pretrained on Ego4D video</text>
+  <text x="352" y="485" text-anchor="middle" class="box-text" fill="#74c0fc" font-style="italic">→ feature extractor</text>
+
+  <!-- Arrow: GR-1 → f_t -->
+  <line x1="435" y1="457" x2="510" y2="457" stroke="#4dabf7" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Feature f_t -->
+  <rect x="510" y="435" width="90" height="48" rx="24" fill="url(#grad-blue)" stroke="#4dabf7" stroke-width="1.8" filter="url(#glow-blue)"/>
+  <text x="555" y="455" text-anchor="middle" class="feature-label" fill="#e7f5ff">fₜ</text>
+  <text x="555" y="475" text-anchor="middle" class="dim-label" fill="#74c0fc">384-dim class token</text>
+
+  <!-- ============================= DREAMING BRANCH ============================= -->
+  <!-- Arrow: f_t → Predictor (curved up) -->
+  <path d="M555,435 Q555,340 640,300" fill="none" stroke="#9775fa" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+  <text x="580" y="360" class="arrow-label" fill="#b197fc">dream</text>
+
+  <!-- GR-1 One-step Prediction Head -->
+  <rect x="650" y="255" width="195" height="70" rx="14" fill="url(#grad-purple)" stroke="#9775fa" stroke-width="1.5" filter="url(#glow-purple)"/>
+  <text x="747" y="282" text-anchor="middle" class="box-title" fill="#d0bfff">GR-1 One-step</text>
+  <text x="747" y="300" text-anchor="middle" class="box-text" fill="#e5dbff">Prediction Head</text>
+  <text x="747" y="316" text-anchor="middle" class="dim-label" fill="#b197fc">one forward pass</text>
+
+  <!-- Arrow: Predictor → f̂_t+1 -->
+  <line x1="845" y1="290" x2="890" y2="290" stroke="#9775fa" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Feature f̂_t+1 -->
+  <rect x="890" y="270" width="95" height="42" rx="21" fill="url(#grad-purple)" stroke="#9775fa" stroke-width="1.8" filter="url(#glow-purple)"/>
+  <text x="937" y="290" text-anchor="middle" class="feature-label" fill="#f3f0ff">f̂ₜ₊₁</text>
+  <text x="937" y="312" text-anchor="middle" class="dim-label" fill="#b197fc">dreamed next feature</text>
+
+  <!-- ============================= MEMORY BANK ============================= -->
+  <!-- Memory Bank M -->
+  <rect x="650" y="620" width="195" height="115" rx="16" fill="url(#grad-orange)" stroke="#ff922b" stroke-width="1.5" filter="url(#glow-orange)"/>
+  <text x="747" y="648" text-anchor="middle" class="box-title" fill="#ffe8cc">Memory Bank M</text>
+  <text x="747" y="668" text-anchor="middle" class="box-text" fill="#ffd8a8">{(fᵢ, fᵢ₊₁, aᵢ)}</text>
+  <text x="747" y="685" text-anchor="middle" class="box-text" fill="#ffc078">demonstrated transitions</text>
+  <text x="747" y="705" text-anchor="middle" class="dim-label" fill="#ffa94d">cosine similarity in joint space</text>
+
+  <!-- k=3 badge -->
+  <rect x="810" y="610" width="42" height="22" rx="11" fill="#ff922b" opacity="0.9"/>
+  <text x="831" y="624" text-anchor="middle" class="badge-text" fill="#0a0a0a">top-k=3</text>
+
+  <!-- ============================= CONCAT NODE ============================= -->
+  <!-- Merge point / concat -->
+  <circle cx="1025" cy="457" r="22" fill="url(#grad-white)" stroke="#ced4da" stroke-width="1.5" filter="url(#glow-white)"/>
+  <text x="1025" y="462" text-anchor="middle" class="box-title" font-size="11px" fill="#f8f9fa">concat</text>
+
+  <!-- Arrow: f_t → concat -->
+  <line x1="600" y1="457" x2="1003" y2="457" stroke="#4dabf7" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Arrow: f̂_t+1 → concat (curved down) -->
+  <path d="M937,312 Q937,380 1003,445" fill="none" stroke="#9775fa" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Dashed arrow: concat → Memory Bank (query) -->
+  <path d="M1025,479 Q1025,560 840,620" fill="none" stroke="#868e96" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-dashed)"/>
+  <text x="940" y="560" text-anchor="middle" class="arrow-label" fill="#868e96">query</text>
+
+  <!-- ============================= RAID HEAD CONTAINER ============================= -->
+  <!-- Container -->
+  <rect x="1065" y="295" width="420" height="325" rx="22" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" stroke-dasharray="8,4"/>
+  <text x="1085" y="322" class="container-label">RAID Head</text>
+  <line x1="1085" y1="330" x2="1465" y2="330" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Input label inside container -->
+  <text x="1080" y="460" class="arrow-label" fill="#868e96">concat(fₜ, f̂ₜ₊₁)</text>
+
+  <!-- Arrow: concat → Trunk -->
+  <line x1="1047" y1="445" x2="1060" y2="380" stroke="#ced4da" stroke-width="1.2" marker-end="url(#arrow-white)"/>
+  <!-- Arrow: concat → Prior -->
+  <line x1="1047" y1="470" x2="1060" y2="520" stroke="#ced4da" stroke-width="1.2" marker-end="url(#arrow-white)"/>
+
+  <!-- Direct Trunk -->
+  <rect x="1065" y="345" width="175" height="85" rx="14" fill="url(#grad-green)" stroke="#51cf66" stroke-width="1.5" filter="url(#glow-green)"/>
+  <text x="1152" y="370" text-anchor="middle" class="box-title" fill="#d3f9d8">Direct Trunk</text>
+  <text x="1152" y="390" text-anchor="middle" class="box-text" fill="#b2f2bb">Two-hidden-layer MLP</text>
+  <text x="1152" y="405" text-anchor="middle" class="box-text" fill="#b2f2bb">LayerNorm · ReLU · Dropout</text>
+  <text x="1152" y="420" text-anchor="middle" class="dim-label" fill="#69db7c">→ trunk output</text>
+
+  <!-- Cross-Attention Prior -->
+  <rect x="1065" y="475" width="175" height="100" rx="14" fill="url(#grad-orange)" stroke="#ff922b" stroke-width="1.5" filter="url(#glow-orange)"/>
+  <text x="1152" y="500" text-anchor="middle" class="box-title" fill="#ffe8cc">Cross-Attention Prior</text>
+  <text x="1152" y="520" text-anchor="middle" class="box-text" fill="#ffd8a8">Query: concat(fₜ, f̂ₜ₊₁)</text>
+  <text x="1152" y="535" text-anchor="middle" class="box-text" fill="#ffd8a8">Keys / Values: retrieved aᵢ</text>
+  <text x="1152" y="555" text-anchor="middle" class="dim-label" fill="#ffa94d">→ weighted sum â_prior</text>
+
+  <!-- Arrow: Memory → Prior (entering from left bottom) -->
+  <path d="M845,635 Q980,635 1065,545" fill="none" stroke="#ff922b" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <text x="970" y="625" text-anchor="middle" class="arrow-label" fill="#ffa94d">retrieved actions</text>
+
+  <!-- Arrows: Trunk → Gate -->
+  <line x1="1240" y1="387" x2="1280" y2="420" stroke="#51cf66" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <!-- Arrow: Prior → Gate -->
+  <line x1="1240" y1="525" x2="1280" y2="480" stroke="#ff922b" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+  <!-- Per-Dimension Gate -->
+  <rect x="1280" y="395" width="160" height="110" rx="16" fill="url(#grad-purple)" stroke="#9775fa" stroke-width="1.5" filter="url(#glow-purple)"/>
+  <text x="1360" y="420" text-anchor="middle" class="box-title" fill="#d0bfff">Per-Dimension Gate</text>
+  <text x="1360" y="442" text-anchor="middle" class="box-text" fill="#e5dbff">g = σ(W·x + b)</text>
+  <text x="1360" y="458" text-anchor="middle" class="box-text" fill="#e5dbff">â = g ⊙ trunk +</text>
+  <text x="1360" y="474" text-anchor="middle" class="box-text" fill="#e5dbff">(1 − g) ⊙ â_prior</text>
+  <text x="1360" y="495" text-anchor="middle" class="dim-label" fill="#b197fc">sigmoid gating per DOF</text>
+
+  <!-- Arrow: Gate → Output -->
+  <line x1="1440" y1="450" x2="1535" y2="450" stroke="#9775fa" stroke-width="2" marker-end="url(#arrow-purple)"/>
+
+  <!-- ============================= OUTPUT ============================= -->
+  <!-- Output Box -->
+  <rect x="1535" y="400" width="145" height="105" rx="16" fill="url(#grad-green)" stroke="#51cf66" stroke-width="1.5" filter="url(#glow-green)"/>
+  <text x="1607" y="425" text-anchor="middle" class="box-title" fill="#d3f9d8">Normalized Action</text>
+  <text x="1607" y="445" text-anchor="middle" class="box-title" fill="#d3f9d8">7-DOF</text>
+  <text x="1607" y="468" text-anchor="middle" class="output-dim">dx, dy, dz</text>
+  <text x="1607" y="485" text-anchor="middle" class="output-dim">dθx, dθy, dθz</text>
+  <text x="1607" y="502" text-anchor="middle" class="output-dim">grip</text>
+
+  <!-- ============================= DECORATIVE / LEGEND ============================= -->
+  <!-- Small legend / color key at bottom left -->
+  <g transform="translate(70, 820)">
+    <rect x="0" y="0" width="310" height="55" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+    <text x="15" y="20" class="dim-label" fill="#868e96" font-size="10px" font-weight="600">Data Flow</text>
+    
+    <line x1="15" y1="35" x2="45" y2="35" stroke="#4dabf7" stroke-width="2" marker-end="url(#arrow-blue)"/>
+    <text x="52" y="39" class="dim-label" fill="#adb5bd">features</text>
+    
+    <line x1="120" y1="35" x2="150" y2="35" stroke="#ff922b" stroke-width="2" marker-end="url(#arrow-orange)"/>
+    <text x="157" y="39" class="dim-label" fill="#adb5bd">retrieval</text>
+    
+    <line x1="220" y1="35" x2="250" y2="35" stroke="#9775fa" stroke-width="2" marker-end="url(#arrow-purple)"/>
+    <text x="257" y="39" class="dim-label" fill="#adb5bd">prediction</text>
+  </g>
+
+  <!-- Decorative corner accents -->
+  <path d="M50,880 L50,850 L80,850" fill="none" stroke="#4dabf7" stroke-width="1.5" opacity="0.4"/>
+  <path d="M1550,850 L1580,850 L1580,880" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
+  <path d="M50,100 L50,130 L80,130" fill="none" stroke="#4dabf7" stroke-width="1.5" opacity="0.4"/>
+  <path d="M1550,130 L1580,130 L1580,100" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Subtle connecting line between dreaming and main flow -->
+  <line x1="555" y1="435" x2="555" y2="483" stroke="#4dabf7" stroke-width="1" opacity="0.3" stroke-dasharray="3,3"/>
+</svg>
