@@ -476,6 +476,7 @@
       height: auto;
       display: block;
       transition: transform 0.5s;
+      filter: invert(1) hue-rotate(180deg);
     }
 
     .grid-card:hover .grid-media img {
@@ -588,10 +589,10 @@
   <nav class="nav">
     <a class="nav-brand" href="#">RAID</a>
     <div class="nav-links">
-      <a href="#results">Results</a>
       <a href="#videos">Videos</a>
       <a href="#method">Method</a>
       <a href="#architecture">Architecture</a>
+      <a href="#results">Results</a>
       <a href="#grids">Grids</a>
     </div>
   </nav>
@@ -608,48 +609,11 @@
       <p class="hero-subtitle animate delay-2">
         RAID pairs a GR-1 world-model encoder with a retrieval-augmented action decoder, using remembered demonstrations to infer the motor command behind a dreamed latent transition.
       </p>
-      <div class="hero-visual animate delay-3">
-        <img src="assets/figures/raid_visual_overview.png" alt="RAID transition samples showing current frames, predicted next frames, and action comparisons">
-        <div class="hero-visual-caption">
-          Qualitative transition samples from cached LIBERO features, comparing RAID predictions with direct visual predictions and ground truth actions.
-        </div>
-      </div>
+
     </div>
   </section>
 
   <div class="divider"></div>
-
-  <section class="section" id="results">
-    <div class="section-inner">
-      <div class="section-label">
-        <span class="eyebrow-dot" style="background:var(--accent-purple);box-shadow:0 0 8px var(--accent-purple);"></span>
-        Results
-      </div>
-      <h2>Retrieval gives the inverse-dynamics head a sharper action prior.</h2>
-      <p class="section-lead">
-        On LIBERO-Spatial with 25 demonstrations, cross-attention RAID over GR-1 features reaches 0.132 validation MSE versus 0.842 for the same visual head without retrieval — a 6.4× improvement.
-      </p>
-
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-value">6.4×</div>
-          <div class="metric-label">Validation-MSE improvement at 25 demonstrations</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value">0.132</div>
-          <div class="metric-label">RAID visual validation MSE in the lowest-data setting</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value">k=3</div>
-          <div class="metric-label">Retrieved demonstrator actions used by the cross-attention prior</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value">7-DOF</div>
-          <div class="metric-label">Action vector decoded for LIBERO pick-and-place manipulation</div>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <section class="section videos-section" id="videos">
     <div class="section-inner">
@@ -666,24 +630,24 @@
         <article class="video-card">
           <div class="video-frame">
             <video controls preload="metadata" poster="assets/posters/direct_visual_poster.jpg">
-              <source src="videos/raid_vs_direct.mp4" type="video/mp4">
+              <source src="videos/test1.mp4" type="video/mp4">
             </video>
           </div>
           <div class="video-info">
-            <h3>RAID vs Direct Visual</h3>
-            <p>Side-by-side comparison showing RAID retrieval-augmented policy alongside the direct visual baseline on LIBERO-Spatial pick-and-place.</p>
+            <h3>Direct Visual Baseline</h3>
+            <p>A representative direct visual demonstration sequence for the RAID comparison.</p>
           </div>
         </article>
 
         <article class="video-card">
           <div class="video-frame">
             <video controls preload="metadata" poster="assets/posters/raid_visual_poster.jpg">
-              <source src="videos/raid_visual.mp4" type="video/mp4">
+              <source src="videos/test2.mp4" type="video/mp4">
             </video>
           </div>
           <div class="video-info">
-            <h3>RAID Visual Policy Rollouts</h3>
-            <p>Representative rollout sequences from the RAID visual policy on LIBERO-Spatial, demonstrating retrieval-augmented action decoding from dreamed GR-1 features.</p>
+            <h3>RAID Visual Policy</h3>
+            <p>A representative RAID visual demonstration showing the retrieval-augmented policy behavior.</p>
           </div>
         </article>
       </div>
@@ -769,6 +733,40 @@
 
       <div class="arch-diagram">
         <img src="assets/figures/raid_architecture.svg" alt="RAID Architecture Diagram showing GR-1 encoder, dreaming head, memory bank, and RAID head with direct trunk, cross-attention prior, and per-dimension gate">
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <section class="section" id="results">
+    <div class="section-inner">
+      <div class="section-label">
+        <span class="eyebrow-dot" style="background:var(--accent-purple);box-shadow:0 0 8px var(--accent-purple);"></span>
+        Results
+      </div>
+      <h2>Retrieval gives the inverse-dynamics head a sharper action prior.</h2>
+      <p class="section-lead">
+        On LIBERO-Spatial with 25 demonstrations, cross-attention RAID over GR-1 features reaches 0.132 validation MSE versus 0.842 for the same visual head without retrieval — a 6.4× improvement.
+      </p>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-value">6.4×</div>
+          <div class="metric-label">Validation-MSE improvement at 25 demonstrations</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">0.132</div>
+          <div class="metric-label">RAID visual validation MSE in the lowest-data setting</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">k=3</div>
+          <div class="metric-label">Retrieved demonstrator actions used by the cross-attention prior</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">7-DOF</div>
+          <div class="metric-label">Action vector decoded for LIBERO pick-and-place manipulation</div>
+        </div>
       </div>
     </div>
   </section>

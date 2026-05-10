@@ -122,8 +122,8 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1600" height="900" fill="#0a0a0a"/>
-  <rect width="1600" height="900" fill="url(#bg-glow)"/>
+  <rect width="1720" height="900" fill="#0a0a0a"/>
+  <rect width="1720" height="900" fill="url(#bg-glow)"/>
 
   <!-- Decorative ambient orbs -->
   <ellipse cx="500" cy="450" rx="350" ry="200" fill="#4dabf7" opacity="0.03" filter="url(#glow-blue)"/>
@@ -279,9 +279,9 @@
 
   <!-- Decorative corner accents -->
   <path d="M50,880 L50,850 L80,850" fill="none" stroke="#4dabf7" stroke-width="1.5" opacity="0.4"/>
-  <path d="M1550,850 L1580,850 L1580,880" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
+  <path d="M1670,850 L1700,850 L1700,880" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
   <path d="M50,100 L50,130 L80,130" fill="none" stroke="#4dabf7" stroke-width="1.5" opacity="0.4"/>
-  <path d="M1550,130 L1580,130 L1580,100" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
+  <path d="M1670,130 L1700,130 L1700,100" fill="none" stroke="#51cf66" stroke-width="1.5" opacity="0.4"/>
 
   <!-- Subtle connecting line between dreaming and main flow -->
   <line x1="555" y1="435" x2="555" y2="483" stroke="#4dabf7" stroke-width="1" opacity="0.3" stroke-dasharray="3,3"/>
