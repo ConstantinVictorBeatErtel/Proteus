@@ -1,0 +1,108 @@
+# Experimental matrix.
+#
+# Each phase expands as the cartesian product of its `heads`, `datasets`,
+# `n_demos`, `seeds`, `encoders`, and `strides` lists. The matrix runner
+# checks each cell's run_id against the artifact root and skips
+# already-completed work, so re-running after a Colab disconnect is
+# idempotent. Phases A-G are experimental-design identifiers, not
+# schedule identifiers.
+
+phases:
+  # Phase A: reproduce the legacy autoresearch baseline on RoboMimic Lift PH
+  # low-dim under the new harness. Uses the same z-score action normalization
+  # as src/data.py so val_mse can be compared directly to configs/results.json.
+  # kNN is a no-train baseline; its val_mse equals the legacy "nearest_neighbor"
+  # column of results.json.
+  - id: A
+    heads: [direct_mlp, raid, knn]
+    datasets: [robomimic_lift_ph_low_dim]
+    n_demos: [25, 50, 100, 200]
+    seeds: [42, 1337, 2024]
+    epochs: 50
+    batch_size: 256
+    action_norm: zscore
+
+  # Phase B: cross-dataset state-only IDM on the four RoboMimic tasks
+  # (PH+MH). The MixedIDMDataset wrapper concatenates the children and
+  # right-pads narrower low-dim states up to the widest task so the
+  # matrix can run without per-task shape special-casing.
+  - id: B
+    heads: [direct_mlp, transformer, diffusion]
+    datasets:
+      - mixed_robomimic_lowdim_full
+      - mixed_robomimic_lowdim_subset25
+    n_demos: [200]
+    seeds: [42, 1337, 2024]
+    epochs: 50
+    action_norm: zscore
+
+  # Phase C: image-feature IDM (the new core). DINOv2 CLS features
+  # cached by ``v2.features``. Includes the cross-attention RAID variant
+  # (``raid_xattn``) — same retrieval bank as ``raid`` but attention-
+  # weighted instead of mean-pooled. Adds n_demos=10 and 25 so we cover
+  # the genuinely-low-data regime where retrieval is supposed to win.
+  - id: C
+    heads: [direct_mlp, raid, raid_xattn, transformer, diffusion]
+    datasets:
+      - robomimic_square_ph_image
+    n_demos: [10, 25, 50, 200]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    epochs: 50
+    action_norm: q01_q99
+
+  # Phase C-stride: same as phase C but with a 5-step temporal stride
+  # so (o_t, o_{t+5}) pairs have a meaningful visual delta. At 20 Hz
+  # this corresponds to a 250 ms window — large enough that adjacent
+  # CLS tokens diverge noticeably. Restricted to the headline heads
+  # so it stays cheap.
+  - id: Cs
+    heads: [direct_mlp, raid, raid_xattn, transformer]
+    datasets: [robomimic_square_ph_image]
+    n_demos: [25, 200]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    strides: [5]
+    epochs: 50
+    action_norm: q01_q99
+
+  # Phase D: encoder ablation. DINOv2 (spatial self-supervised, phase C)
+  # vs SigLIP (semantic language-aligned, this phase) on the best-of-C
+  # head. SigLIP loads cleanly via standard transformers; we use only
+  # its vision tower (loader strips the text branch automatically).
+  - id: D
+    heads: [transformer]
+    datasets: [robomimic_square_ph_image]
+    n_demos: [200]
+    seeds: [42, 1337, 2024]
+    encoders: [siglip]
+    epochs: 50
+    action_norm: q01_q99
+
+  # Phase E: multi-task retrieval test on LIBERO-Spatial pooled across
+  # tasks. Reads HDF5s direct from <DRIVE>/data/libero/libero_spatial/
+  # (10 tasks x 50 demos = 500 episodes). The "n_demos" here is the
+  # total episodes pooled across tasks in deterministic
+  # filename-then-demo-index order, so 50 demos = roughly the first
+  # 5 demos of each task. Stride 5 brings the same image-IDM
+  # learnability lift we measured in phase Cs.
+  - id: E
+    heads: [direct_mlp, raid, raid_xattn]
+    datasets: [libero_spatial]
+    n_demos: [50, 200]
+    seeds: [42, 1337, 2024]
+    encoders: [dinov2]
+    strides: [5]
+    epochs: 50
+    action_norm: q01_q99
+
+  # Phase F: optional GR00T-N1.5 LoRA stretch goal. Out of scope by
+  # default; uncomment once the loader has been wired against
+  # github.com/NVIDIA/Isaac-GR00T scripts/gr00t_finetune.py.
+  # - id: F
+  #   heads: [groot_n15_lora]
+  #   datasets: [libero_spatial]
+  #   n_demos: [200]
+  #   seeds: [42]
+  #   encoders: [native]
+  #   epochs: 30
