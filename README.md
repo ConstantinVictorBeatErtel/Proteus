@@ -6,7 +6,7 @@ Evaluated on **LIBERO-Spatial** (10 pick-and-place tasks, 50 demonstrations each
 
 ---
 
-## Motivation: Ken Goldberg's action inference gap
+## Motivation: action inference gap
 
 In contact-rich manipulation, the mapping from RGB frames to correct motor commands is inherently ambiguous: contact state, friction, and task intent are latent in images that a neural encoder alone cannot fully resolve.
 
