@@ -181,9 +181,9 @@
   <!-- Memory Bank M -->
   <rect x="650" y="620" width="195" height="115" rx="16" fill="url(#grad-orange)" stroke="#ff922b" stroke-width="1.5" filter="url(#glow-orange)"/>
   <text x="747" y="648" text-anchor="middle" class="box-title" fill="#ffe8cc">Memory Bank M</text>
-  <text x="747" y="668" text-anchor="middle" class="box-text" fill="#ffd8a8">{(fᵢ, fᵢ₊₁, aᵢ)}</text>
-  <text x="747" y="685" text-anchor="middle" class="box-text" fill="#ffc078">demonstrated transitions</text>
-  <text x="747" y="705" text-anchor="middle" class="dim-label" fill="#ffa94d">cosine similarity in joint space</text>
+  <text x="747" y="668" text-anchor="middle" class="box-text" fill="#ffd8a8">{concat(fᵢ, fᵢ₊₁) → aᵢ}</text>
+  <text x="747" y="685" text-anchor="middle" class="box-text" fill="#ffc078">demonstrated transition keys</text>
+  <text x="747" y="705" text-anchor="middle" class="dim-label" fill="#ffa94d">cosine similarity over transition pairs</text>
 
   <!-- k=3 badge -->
   <rect x="810" y="610" width="42" height="22" rx="11" fill="#ff922b" opacity="0.9"/>
@@ -221,15 +221,15 @@
   <!-- Direct Trunk -->
   <rect x="1065" y="345" width="175" height="85" rx="14" fill="url(#grad-green)" stroke="#51cf66" stroke-width="1.5" filter="url(#glow-green)"/>
   <text x="1152" y="370" text-anchor="middle" class="box-title" fill="#d3f9d8">Direct Trunk</text>
-  <text x="1152" y="390" text-anchor="middle" class="box-text" fill="#b2f2bb">Two-hidden-layer MLP</text>
-  <text x="1152" y="405" text-anchor="middle" class="box-text" fill="#b2f2bb">LayerNorm · ReLU · Dropout</text>
-  <text x="1152" y="420" text-anchor="middle" class="dim-label" fill="#69db7c">→ trunk output</text>
+  <text x="1152" y="390" text-anchor="middle" class="box-text" fill="#b2f2bb">Input: concat(fₜ, f̂ₜ₊₁)</text>
+  <text x="1152" y="405" text-anchor="middle" class="box-text" fill="#b2f2bb">2-layer MLP · LN · ReLU · Dropout</text>
+  <text x="1152" y="420" text-anchor="middle" class="dim-label" fill="#69db7c">→ direct action estimate</text>
 
   <!-- Cross-Attention Prior -->
   <rect x="1065" y="475" width="175" height="100" rx="14" fill="url(#grad-orange)" stroke="#ff922b" stroke-width="1.5" filter="url(#glow-orange)"/>
   <text x="1152" y="500" text-anchor="middle" class="box-title" fill="#ffe8cc">Cross-Attention Prior</text>
   <text x="1152" y="520" text-anchor="middle" class="box-text" fill="#ffd8a8">Query: concat(fₜ, f̂ₜ₊₁)</text>
-  <text x="1152" y="535" text-anchor="middle" class="box-text" fill="#ffd8a8">Keys / Values: retrieved aᵢ</text>
+  <text x="1152" y="535" text-anchor="middle" class="box-text" fill="#ffd8a8">Values: retrieved actions aᵢ</text>
   <text x="1152" y="555" text-anchor="middle" class="dim-label" fill="#ffa94d">→ weighted sum â_prior</text>
 
   <!-- Arrow: Memory → Prior (entering from left bottom) -->
